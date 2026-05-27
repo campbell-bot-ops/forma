@@ -205,10 +205,12 @@ export const db = {
 
     // Live Supabase Register
     const supabase = getSupabase();
+    const redirectToUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : undefined;
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
+        emailRedirectTo: redirectToUrl,
         data: {
           name: name.trim(),
           weight,

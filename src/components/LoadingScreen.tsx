@@ -66,11 +66,11 @@ export default function LoadingScreen({ onFinished }: LoadingScreenProps) {
           <Image
             src="/Frame 166.png"
             alt="FORMA Logo"
-            width={240}
-            height={55}
+            width={160}
+            height={36}
             priority
             style={{ height: 'auto' }}
-            className="h-12 w-auto object-contain"
+            className="h-8 w-auto object-contain"
           />
         </motion.div>
 

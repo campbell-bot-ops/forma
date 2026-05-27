@@ -93,15 +93,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Smooth scrolling override */
-html.lenis {
+/* Smooth scrolling overrides for Lenis */
+html.lenis,
+html.lenis body {
   height: auto;
 }
 
-.lenis-clean html {
+.lenis.lenis-smooth {
   scroll-behavior: auto !important;
 }
 
-.lenis-clean body {
-  scroll-behavior: auto !important;
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }

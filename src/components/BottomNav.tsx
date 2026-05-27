@@ -23,7 +23,7 @@ export default function BottomNav({ activeTab, setActiveTab, disabled = false }:
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-6 pt-2 bg-gradient-to-t from-obsidian via-obsidian/95 to-transparent pointer-events-none">
-      <nav className="max-w-md mx-auto glass-panel glass-panel-glow rounded-full px-6 py-3 flex items-center justify-around pointer-events-auto shadow-2xl">
+      <nav className="max-w-md md:max-w-xl mx-auto glass-panel glass-panel-glow rounded-full px-6 py-3 flex items-center justify-around pointer-events-auto shadow-2xl">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

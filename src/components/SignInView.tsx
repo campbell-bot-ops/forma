@@ -81,11 +81,11 @@ export default function SignInView({ onSuccess }: SignInViewProps) {
           <Image
             src="/Frame 166.png"
             alt="FORMA Logo"
-            width={180}
-            height={40}
+            width={120}
+            height={28}
             priority
             style={{ height: 'auto' }}
-            className="h-10 w-auto object-contain mb-2"
+            className="h-7 w-auto object-contain mb-2"
           />
           <p className="text-[9px] tracking-[0.3em] text-zinc-500 uppercase font-semibold">
             Workout Tracker
