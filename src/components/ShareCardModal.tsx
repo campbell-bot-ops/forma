@@ -1,0 +1,887 @@
+'use client';
+
+import React, { useRef, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Download, Check, ShieldCheck, Dumbbell, MapPin, Zap } from 'lucide-react';
+import { UserProfile } from '@/utils/db';
+
+interface ShareCardModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  sessionTitle: string;
+  sessionFocus: string;
+  actualTonnage: number;
+  exerciseCount: number;
+  userProfile: UserProfile;
+  sessionType?: 'workout' | 'recovery';
+  logs?: any;
+  cardioDetails?: {
+    duration: number;
+    distance: number;
+    calories: number;
+    speed: number;
+    incline: number;
+    units: 'metric' | 'imperial';
+  };
+  recoveryDetails?: {
+    activity: string;
+    duration: number;
+    recoveryRate: number;
+    distance?: number;
+    calories?: number;
+    avgSpeed?: number;
+    path?: Array<{ lat: number; lng: number; time: number }>;
+  };
+}
+
+export default function ShareCardModal({
+  isOpen,
+  onClose,
+  sessionTitle,
+  sessionFocus,
+  actualTonnage,
+  exerciseCount,
+  userProfile,
+  sessionType = 'workout',
+  logs,
+  cardioDetails,
+  recoveryDetails
+}: ShareCardModalProps) {
+  const [downloaded, setDownloaded] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Compute Units conversions for displays
+  const isImperialSetting = userProfile.units === 'imperial';
+  
+  // 1. Calculations for Workout Stats
+  let totalSets = 0;
+  let sumRpe = 0;
+  let rpeCount = 0;
+  let topLiftName = '';
+  let topLiftWeight = 0;
+  let topLiftReps = 0;
+  let totalEffectiveReps = 0;
+
+  if (logs) {
+    Object.keys(logs).forEach(exId => {
+      const sets = logs[exId];
+      if (Array.isArray(sets)) {
+        totalSets += sets.length;
+        sets.forEach((s: any) => {
+          if (s) {
+            const rpeVal = typeof s.rpe === 'number' ? s.rpe : 8;
+            const repsVal = typeof s.reps === 'number' ? s.reps : 0;
+            const weightVal = typeof s.weight === 'number' ? s.weight : 0;
+
+            sumRpe += rpeVal;
+            rpeCount++;
+
+            if (weightVal > topLiftWeight) {
+              topLiftWeight = weightVal;
+              topLiftName = exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              topLiftReps = repsVal;
+            }
+            // Effective Reps = max(0, min(reps, 5 - (10 - RPE)))
+            const eff = Math.max(0, Math.min(repsVal, 5 - (10 - rpeVal)));
+            totalEffectiveReps += eff;
+          }
+        });
+      }
+    });
+  }
+
+  const avgRpe = rpeCount > 0 ? (sumRpe / rpeCount).toFixed(1) : '8.0';
+  const topLift1RMEst = topLiftWeight > 0 ? Math.round(topLiftWeight / (1.0278 - 0.0278 * topLiftReps)) : 0;
+
+  // Weight Displays
+  const displayWeight = (wKg: number) => {
+    return isImperialSetting 
+      ? `${Math.round(wKg * 2.20462)} lbs` 
+      : `${wKg} kg`;
+  };
+
+  const displayTonnage = () => {
+    const tonVal = isImperialSetting ? actualTonnage * 2.20462 : actualTonnage;
+    return `${Math.round(tonVal).toLocaleString()} ${isImperialSetting ? 'lbs' : 'kg'}`;
+  };
+
+  // 2. Local canvas drawing logic on mount/open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Small delay to ensure canvas element ref is loaded
+    const timeout = setTimeout(() => {
+      drawCanvas();
+    }, 100);
+
+    return () => clearTimeout(timeout);
+  }, [isOpen, userProfile, logs, cardioDetails, recoveryDetails]);
+
+  const drawCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const setLetterSpacing = (val: string) => {
+      if ('letterSpacing' in ctx) {
+        try {
+          (ctx as any).letterSpacing = val;
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+
+    // Dimensions: 1080 x 1920 (Instagram Story 9:16 Portrait ratio)
+    canvas.width = 1080;
+    canvas.height = 1920;
+
+    // Background color
+    ctx.fillStyle = '#020202';
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // Ambient radial gradients
+    const grad1 = ctx.createRadialGradient(800, 300, 50, 800, 300, 700);
+    grad1.addColorStop(0, 'rgba(34, 211, 238, 0.04)'); // Cyan soft glow
+    grad1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad1;
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    const grad2 = ctx.createRadialGradient(200, 1500, 50, 200, 1500, 600);
+    grad2.addColorStop(0, 'rgba(16, 185, 129, 0.03)'); // Emerald soft glow
+    grad2.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad2;
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // Technical Grid Lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
+    ctx.lineWidth = 1;
+    const gridSpacing = 80;
+    for (let x = 0; x < canvas.width; x += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+
+    // Double Border Outline Frame
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(60, 60, 960, 1800);
+    
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(80, 80, 920, 1760);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 54px "Courier New", Courier, monospace';
+    setLetterSpacing('10px');
+    ctx.textAlign = 'center';
+    ctx.fillText('FORMA', 540, 190);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '500 20px "Courier New", Courier, monospace';
+    setLetterSpacing('6px');
+    ctx.fillText('WORKOUT TRACKER', 540, 235);
+
+    // Header divider
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(120, 280);
+    ctx.lineTo(960, 280);
+    ctx.stroke();
+
+    // User Biometrics Block
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = 'bold 18px "Courier New", Courier, monospace';
+    setLetterSpacing('2px');
+    ctx.fillText('USER PROFILE:', 120, 360);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 36px sans-serif';
+    setLetterSpacing('0px');
+    ctx.fillText(userProfile.name.toUpperCase(), 120, 410);
+
+    // Biometrics Row Table
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeRect(120, 460, 840, 130);
+    
+    // Weight Display
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '16px "Courier New", Courier, monospace';
+    ctx.fillText('WEIGHT', 160, 505);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px sans-serif';
+    const weightDisplayVal = isImperialSetting 
+      ? `${(userProfile.weight * 2.20462).toFixed(1)} LBS` 
+      : `${userProfile.weight.toFixed(1)} KG`;
+    ctx.fillText(weightDisplayVal, 160, 550);
+
+    // Height Display
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '16px "Courier New", Courier, monospace';
+    ctx.fillText('HEIGHT', 440, 505);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px sans-serif';
+    const heightDisplayVal = isImperialSetting
+      ? `${Math.floor((userProfile.height / 2.54) / 12)}'${Math.round((userProfile.height / 2.54) % 12)}"`
+      : `${userProfile.height} CM`;
+    ctx.fillText(heightDisplayVal, 440, 550);
+
+    // Body Fat Display
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '16px "Courier New", Courier, monospace';
+    ctx.fillText('BODY FAT', 720, 505);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillText(`${userProfile.bodyFat}%`, 720, 550);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.beginPath();
+    ctx.moveTo(120, 640);
+    ctx.lineTo(960, 640);
+    ctx.stroke();
+
+    // 3. MORPH BASED ON SESSION TYPE
+    if (sessionType === 'workout') {
+      // workout title
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 18px "Courier New", Courier, monospace';
+      ctx.fillText('WORKOUT SUMMARY LOG:', 120, 700);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 44px sans-serif';
+      ctx.fillText(sessionTitle.toUpperCase(), 120, 760);
+      
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.font = '500 24px sans-serif';
+      ctx.fillText(sessionFocus, 120, 810);
+
+      // Large Stats Grid Box
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      ctx.fillRect(120, 860, 840, 240);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeRect(120, 860, 840, 240);
+
+      // Columns inside stats box
+      // Column A: Tonnage
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('TOTAL WEIGHT LIFTED', 300, 910);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'extrabold 54px sans-serif';
+      const tonVal = isImperialSetting ? actualTonnage * 2.20462 : actualTonnage;
+      ctx.fillText(Math.round(tonVal).toLocaleString(), 300, 990);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 16px "Courier New", Courier, monospace';
+      ctx.fillText(isImperialSetting ? 'LBS' : 'KG', 300, 1040);
+
+      // Column divider
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.beginPath();
+      ctx.moveTo(540, 880);
+      ctx.lineTo(540, 1080);
+      ctx.stroke();
+
+      // Column B: Growth Reps
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('GROWTH STIMULUS', 720, 910);
+      ctx.fillStyle = '#06B6D4'; // Cyan
+      ctx.font = 'extrabold 54px sans-serif';
+      ctx.fillText(`${totalEffectiveReps}`, 720, 990);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 16px "Courier New", Courier, monospace';
+      ctx.fillText('GROWTH REPS', 720, 1040);
+
+      // Technical Strength indicators row
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.01)';
+      ctx.fillRect(120, 1130, 840, 110);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeRect(120, 1130, 840, 110);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('TOTAL SETS:', 150, 1190);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${totalSets} completed`, 260, 1190);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('DIFFICULTY (RPE):', 450, 1190);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${avgRpe}/10`, 530, 1190);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('EST MAX LIFT:', 670, 1190);
+      ctx.fillStyle = '#34D399'; // Emerald
+      ctx.font = 'bold 20px sans-serif';
+      const oneRmText = topLiftWeight > 0 
+        ? `${displayWeight(topLift1RMEst)} on ${topLiftName.slice(0, 10)}...` 
+        : '0 kg';
+      ctx.fillText(oneRmText, 750, 1190);
+
+      // Detailed exercises printout console
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 18px "Courier New", Courier, monospace';
+      ctx.fillText('WORKOUT DETAIL LOGS:', 120, 1290);
+
+      if (logs) {
+        let printY = 1340;
+        const exKeys = Object.keys(logs).slice(0, 4); // Limit to top 4 exercises
+        ctx.font = '14px "Courier New", Courier, monospace';
+        
+        exKeys.forEach((exId, idx) => {
+          const sets = logs[exId];
+          let maxLoad = 0;
+          let maxLoadReps = 0;
+          let maxLoadRpe = 0;
+          sets.forEach((s: any) => {
+            if (s.weight > maxLoad) {
+              maxLoad = s.weight;
+              maxLoadReps = s.reps;
+              maxLoadRpe = s.rpe;
+            }
+          });
+          
+          const exName = exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+          ctx.fillText(`[0${idx + 1}] ${exName.slice(0, 24).padEnd(24, ' ')}`, 120, printY);
+          
+          ctx.fillStyle = '#FFFFFF';
+          const statsLabel = `| ${sets.length} Sets | Max: ${displayWeight(maxLoad)} x ${maxLoadReps} @ RPE ${maxLoadRpe}`;
+          ctx.fillText(statsLabel, 440, printY);
+          printY += 40;
+        });
+      }
+
+      // Treadmill Finisher Stats card
+      if (cardioDetails) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.fillRect(120, 1515, 840, 105);
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.2)'; // Cyan border glow
+        ctx.strokeRect(120, 1515, 840, 105);
+
+        ctx.fillStyle = '#22D3EE';
+        ctx.font = 'bold 12px "Courier New", Courier, monospace';
+        ctx.fillText('CARDIO FINISHER: TREADMILL WALK', 140, 1545);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 15px sans-serif';
+        const cardioUnitsLabel = cardioDetails.units === 'imperial' ? 'miles' : 'km';
+        const speedUnitsLabel = cardioDetails.units === 'imperial' ? 'mph' : 'km/h';
+        const cardioText = `Duration: ${cardioDetails.duration} Mins | Dist: ${cardioDetails.distance} ${cardioUnitsLabel} | Incline: ${cardioDetails.incline}% | Speed: ${cardioDetails.speed} ${speedUnitsLabel} | Burn: ${cardioDetails.calories} kcal`;
+        ctx.fillText(cardioText, 140, 1585);
+      }
+    } else {
+      // 4. RECOVERY DAY GPS PATH RENDERING
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 18px "Courier New", Courier, monospace';
+      ctx.fillText('RECOVERY LOG:', 120, 700);
+
+      ctx.fillStyle = '#22D3EE'; // Cyan
+      ctx.font = 'bold 44px sans-serif';
+      const actTitle = recoveryDetails?.activity || 'FAST WALKING';
+      ctx.fillText(actTitle.toUpperCase(), 120, 760);
+      
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.font = '500 24px sans-serif';
+      ctx.fillText(sessionFocus, 120, 810);
+
+      // GPS Route Plotting radar box in the center
+      const radarX = 120;
+      const radarY = 860;
+      const radarW = 840;
+      const radarH = 460;
+
+      ctx.fillStyle = '#060B12';
+      ctx.fillRect(radarX, radarY, radarW, radarH);
+      
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(radarX, radarY, radarW, radarH);
+
+      // Draw radar grids
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+      const radGrid = 46;
+      for (let rx = radarX; rx < radarX + radarW; rx += radGrid) {
+        ctx.beginPath();
+        ctx.moveTo(rx, radarY);
+        ctx.lineTo(rx, radarY + radarH);
+        ctx.stroke();
+      }
+      for (let ry = radarY; ry < radarY + radarH; ry += radGrid) {
+        ctx.beginPath();
+        ctx.moveTo(radarX, ry);
+        ctx.lineTo(radarX + radarW, ry);
+        ctx.stroke();
+      }
+
+      // Compass indicators in corners
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.font = '12px monospace';
+      ctx.fillText('N 00.00°', radarX + 20, radarY + 30);
+      ctx.fillText('S 180.00°', radarX + 20, radarY + radarH - 20);
+      ctx.textAlign = 'right';
+      ctx.fillText('E 90.00°', radarX + radarW - 20, radarY + 30);
+      ctx.fillText('W 270.00°', radarX + radarW - 20, radarY + radarH - 20);
+      ctx.textAlign = 'left';
+
+      // Draw building blocks inside radar
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.003)';
+      const blockSz = 60;
+      for (let bx = radarX + 10; bx < radarX + radarW; bx += 90) {
+        for (let by = radarY + 10; by < radarY + radarH; by += 80) {
+          ctx.fillRect(bx, by, blockSz, blockSz - 10);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.012)';
+          ctx.strokeRect(bx, by, blockSz, blockSz - 10);
+        }
+      }
+
+      // Plot route path if coords exist
+      const path = recoveryDetails?.path;
+      if (path && path.length >= 2) {
+        let minLat = Infinity, maxLat = -Infinity;
+        let minLng = Infinity, maxLng = -Infinity;
+        
+        path.forEach(p => {
+          if (p.lat < minLat) minLat = p.lat;
+          if (p.lat > maxLat) maxLat = p.lat;
+          if (p.lng < minLng) minLng = p.lng;
+          if (p.lng > maxLng) maxLng = p.lng;
+        });
+
+        const latRange = maxLat - minLat || 0.0001;
+        const lngRange = maxLng - minLng || 0.0001;
+
+        const latPadding = latRange * 0.15;
+        const lngPadding = lngRange * 0.15;
+
+        const paddedMinLat = minLat - latPadding;
+        const paddedMaxLat = maxLat + latPadding;
+        const paddedMinLng = minLng - lngPadding;
+        const paddedMaxLng = maxLng + lngPadding;
+
+        const paddedLatRange = paddedMaxLat - paddedMinLat;
+        const paddedLngRange = paddedMaxLng - paddedMinLng;
+
+        // Draw speed segments
+        for (let i = 1; i < path.length; i++) {
+          const prevPt = path[i - 1];
+          const pt = path[i];
+
+          const x1 = radarX + ((prevPt.lng - paddedMinLng) / paddedLngRange) * radarW;
+          const y1 = radarY + ((paddedMaxLat - prevPt.lat) / paddedLatRange) * radarH;
+          const x2 = radarX + ((pt.lng - paddedMinLng) / paddedLngRange) * radarW;
+          const y2 = radarY + ((paddedMaxLat - pt.lat) / paddedLatRange) * radarH;
+
+          // Haversine distance
+          const dLat = ((pt.lat - prevPt.lat) * Math.PI) / 180;
+          const dLon = ((pt.lng - prevPt.lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos((prevPt.lat * Math.PI) / 180) *
+              Math.cos((pt.lat * Math.PI) / 180) *
+              Math.sin(dLon / 2) *
+              Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const dist = 6371 * c; // in km
+
+          const timeDiffHrs = (pt.time - prevPt.time) / 3600000;
+          const segmentSpeed = timeDiffHrs > 0 ? dist / timeDiffHrs : 0;
+
+          // Color rules: Fast (>= 5.5 km/h) = cyan, moderate (3.5 to 5.5) = amber, slow/paused (< 3.5) = crimson
+          let color = '#22D3EE'; // Cyan
+          if (segmentSpeed < 3.5) {
+            color = '#FF3355'; // Crimson
+          } else if (segmentSpeed < 5.5) {
+            color = '#FFAA00'; // Amber
+          }
+
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 5;
+          ctx.lineCap = 'round';
+          
+          // Draw with glowing shadow
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 8;
+          ctx.stroke();
+        }
+        ctx.shadowBlur = 0; // Reset shadow
+
+        // Green start node
+        const sX = radarX + ((path[0].lng - paddedMinLng) / paddedLngRange) * radarW;
+        const sY = radarY + ((paddedMaxLat - path[0].lat) / paddedLatRange) * radarH;
+        ctx.fillStyle = '#10B981';
+        ctx.beginPath();
+        ctx.arc(sX, sY, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Red end node
+        const eX = radarX + ((path[path.length - 1].lng - paddedMinLng) / paddedLngRange) * radarW;
+        const eY = radarY + ((paddedMaxLat - path[path.length - 1].lat) / paddedLatRange) * radarH;
+        ctx.fillStyle = '#EF4444';
+        ctx.beginPath();
+        ctx.arc(eX, eY, 8, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Draw coordinate loading
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.font = '18px monospace';
+        ctx.fillText('NO GPS VECTOR ROUTE DATA FOR THIS LOG', radarX + radarW / 2, radarY + radarH / 2);
+        ctx.textAlign = 'left';
+      }
+
+      // Display recovery stats below map
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = 'bold 18px "Courier New", Courier, monospace';
+      ctx.fillText('RECOVERY METRICS:', 120, 1370);
+
+      // Stats table grid
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      ctx.fillRect(120, 1400, 840, 200);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeRect(120, 1400, 840, 200);
+
+      // Duration & Distance
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('TIME ELAPSED:', 160, 1450);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${recoveryDetails?.duration || 0} Mins`, 300, 1450);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('GPS DISTANCE:', 160, 1500);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px sans-serif';
+      const recDistVal = recoveryDetails?.distance || 0;
+      const recDistLabel = isImperialSetting ? 'Miles' : 'km';
+      ctx.fillText(`${recDistVal} ${recDistLabel}`, 300, 1500);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('AVG SPEED:', 160, 1550);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px sans-serif';
+      const recSpeedVal = recoveryDetails?.avgSpeed || 0;
+      const recSpeedLabel = isImperialSetting ? 'mph' : 'km/h';
+      ctx.fillText(`${recSpeedVal} ${recSpeedLabel}`, 300, 1550);
+
+      // Calorie burn & Recovery rate
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('CALORIES BURNED:', 550, 1450);
+      ctx.fillStyle = '#EF4444'; // Red-orange energy
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${recoveryDetails?.calories || 0} kCal`, 720, 1450);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('RECOVERY LEVEL:', 550, 1500);
+      ctx.fillStyle = '#22D3EE'; // Cyan
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${recoveryDetails?.recoveryRate || 0}/10 Index`, 720, 1500);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('STATUS:', 550, 1550);
+      ctx.fillStyle = '#34D399'; // Emerald
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('RECOVERED', 720, 1550);
+    }
+
+    // Barcode and verification seal (Common bottom section)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.beginPath();
+    ctx.moveTo(120, 1660);
+    ctx.lineTo(960, 1660);
+    ctx.stroke();
+
+    // Barcode
+    const barcodeX = 120;
+    const barcodeY = 1690;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    let currentX = barcodeX;
+    
+    const pattern = [4, 12, 6, 2, 8, 14, 2, 6, 12, 4, 8, 6, 2, 10, 4, 12, 6, 2, 8, 10, 4];
+    pattern.forEach((w, i) => {
+      ctx.fillRect(currentX, barcodeY, w, 60);
+      currentX += w + (i % 2 === 0 ? 4 : 8);
+    });
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.font = '14px "Courier New", Courier, monospace';
+    ctx.fillText(`WORKOUT RECORD ID: FORMA-${Date.now().toString().slice(-8)}`, 120, 1780);
+
+    // Timestamp right aligned
+    ctx.textAlign = 'right';
+    const dateStr = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    }).toUpperCase();
+    ctx.fillText(dateStr, 960, 1720);
+    ctx.fillText(sessionType === 'workout' ? 'STRENGTH PROGRAM' : 'RECOVERY DAY SESSION', 960, 1750);
+
+    setDownloaded(false);
+  };
+
+  const triggerDownload = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `forma-${sessionType}-${sessionTitle.toLowerCase().replace(/\s+/g, '-')}.png`;
+    link.href = url;
+    link.click();
+    
+    setDownloaded(true);
+    setTimeout(() => setDownloaded(false), 3000);
+  };
+
+  if (!isOpen) return null;
+
+  // Web app interactive preview parameters
+  const weightText = isImperialSetting 
+    ? `${(userProfile.weight * 2.20462).toFixed(1)} lbs` 
+    : `${userProfile.weight.toFixed(1)} kg`;
+  
+  const heightText = isImperialSetting
+    ? `${Math.floor((userProfile.height / 2.54) / 12)}'${Math.round((userProfile.height / 2.54) % 12)}"`
+    : `${userProfile.height} cm`;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col justify-between p-6 max-w-md mx-auto overflow-y-auto">
+      
+      {/* Hidden Canvas element for PNG rendering */}
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* Header Close button */}
+      <div className="flex justify-between items-center pb-4 border-b border-white/5">
+        <span className="text-xs font-bold text-white uppercase tracking-widest font-mono">
+          Workout Card Export
+        </span>
+        <button
+          onClick={onClose}
+          className="p-1 rounded-full bg-white/5 border border-white/5 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* Visual Portrait Card Preview (Scaled down mockup) */}
+      <div className="flex-1 flex items-center justify-center my-6">
+        <div className="w-[280px] h-[497px] bg-[#020202] border border-white/10 rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between shadow-2xl select-none">
+          {/* Grid background */}
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:10px_10px]" />
+          
+          <div className="absolute -top-12 -right-12 w-32 h-32 bg-white/[0.01] rounded-full blur-xl pointer-events-none" />
+
+          {/* Card Top Branding */}
+          <div className="text-center relative z-10">
+            <span className="text-[14px] font-bold tracking-[6px] text-white block uppercase font-mono">
+              FORMA
+            </span>
+            <span className="text-[6px] tracking-[3px] text-zinc-500 block uppercase font-mono mt-0.5">
+              WORKOUT TRACKER
+            </span>
+            <div className="h-[1px] bg-white/10 mt-2.5 mx-6" />
+          </div>
+
+          {/* User Details */}
+          <div className="relative z-10 px-2">
+            <span className="text-[5px] text-zinc-500 font-mono block">USER PROFILE:</span>
+            <span className="text-[10px] font-bold text-white block tracking-wide truncate">
+              {userProfile.name.toUpperCase()}
+            </span>
+            
+            {/* Specs row */}
+            <div className="grid grid-cols-3 gap-1 mt-1.5 py-1 border border-white/5 bg-white/[0.01] text-center rounded">
+              <div>
+                <span className="text-[4px] text-zinc-500 block">WEIGHT</span>
+                <span className="text-[7px] font-bold text-white font-mono">{weightText}</span>
+              </div>
+              <div>
+                <span className="text-[4px] text-zinc-500 block">HEIGHT</span>
+                <span className="text-[7px] font-bold text-white font-mono">{heightText}</span>
+              </div>
+              <div>
+                <span className="text-[4px] text-zinc-500 block">BODY FAT</span>
+                <span className="text-[7px] font-bold text-white font-mono">{userProfile.bodyFat}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Dynamic Content Preview */}
+          {sessionType === 'workout' ? (
+            /* Workout Preview */
+            <div className="relative z-10 flex flex-col gap-1 px-1">
+              <div className="text-center py-2 border border-white/5 bg-white/[0.01] rounded-lg">
+                <span className="text-[5px] text-zinc-500 block font-mono">TOTAL WEIGHT LIFTED</span>
+                <span className="text-xl font-extrabold text-white block font-mono tracking-tighter leading-none my-1">
+                  {displayTonnage()}
+                </span>
+                <span className="text-[5px] text-zinc-500 block font-mono">GROWTH STIMULUS: {totalEffectiveReps} GROWTH REPS</span>
+              </div>
+              
+              <div className="flex justify-between items-center bg-white/[0.01] border border-white/5 rounded p-1 text-[6px] text-zinc-400 font-mono">
+                <span>Sets: {totalSets}</span>
+                <span>Avg RPE: {avgRpe}</span>
+                {topLiftWeight > 0 && <span className="text-emerald-400">Max Lift: {displayWeight(topLift1RMEst)}</span>}
+              </div>
+
+              {/* LISS finisher preview */}
+              {cardioDetails && (
+                <div className="bg-cyan-950/10 border border-cyan-900/20 rounded p-1 text-[5px] text-zinc-400">
+                  <span className="text-cyan-400 font-bold block">TREADMILL CARDIO FINISHER:</span>
+                  <span>{cardioDetails.duration}m | {cardioDetails.distance} {cardioDetails.units === 'imperial' ? 'mi' : 'km'} | {cardioDetails.calories} kCal</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Active Recovery GPS Preview */
+            <div className="relative z-10 flex flex-col gap-1.5 px-1">
+              {/* Small canvas-style path preview using SVG */}
+              <div className="w-full h-16 bg-[#060B12] border border-white/5 rounded-lg flex items-center justify-center relative overflow-hidden">
+                {recoveryDetails?.path && recoveryDetails.path.length >= 2 ? (
+                  <svg className="w-full h-full p-2" viewBox="0 0 100 50">
+                    {/* Convert lat/lng array to SVG line */}
+                    {(() => {
+                      const path = recoveryDetails.path;
+                      let minLat = Infinity, maxLat = -Infinity;
+                      let minLng = Infinity, maxLng = -Infinity;
+                      
+                      path.forEach(p => {
+                        if (p.lat < minLat) minLat = p.lat;
+                        if (p.lat > maxLat) maxLat = p.lat;
+                        if (p.lng < minLng) minLng = p.lng;
+                        if (p.lng > maxLng) maxLng = p.lng;
+                      });
+
+                      const latRange = maxLat - minLat || 0.0001;
+                      const lngRange = maxLng - minLng || 0.0001;
+
+                      const pointsStr = path.map(pt => {
+                        const x = ((pt.lng - minLng) / lngRange) * 80 + 10;
+                        const y = 40 - ((pt.lat - minLat) / latRange) * 30; // invert latitude
+                        return `${x},${y}`;
+                      }).join(' ');
+
+                      return (
+                        <>
+                          <polyline
+                            fill="none"
+                            stroke="#22D3EE"
+                            strokeWidth="2.5"
+                            points={pointsStr}
+                          />
+                          {/* Start dot */}
+                          {(() => {
+                            const sx = ((path[0].lng - minLng) / lngRange) * 80 + 10;
+                            const sy = 40 - ((path[0].lat - minLat) / latRange) * 30;
+                            return <circle cx={sx} cy={sy} r="2.5" fill="#10B981" />;
+                          })()}
+                          {/* End dot */}
+                          {(() => {
+                            const ex = ((path[path.length - 1].lng - minLng) / lngRange) * 80 + 10;
+                            const ey = 40 - ((path[path.length - 1].lat - minLat) / latRange) * 30;
+                            return <circle cx={ex} cy={ey} r="2.5" fill="#EF4444" />;
+                          })()}
+                        </>
+                      );
+                    })()}
+                  </svg>
+                ) : (
+                  <span className="text-[5px] font-mono text-zinc-600 uppercase">GPS ROUTE LOCKED</span>
+                )}
+              </div>
+
+              {/* Stats column */}
+              <div className="grid grid-cols-2 gap-1 border border-white/5 bg-white/[0.01] rounded p-1 text-[6px] text-zinc-400 font-mono">
+                <div>Duration: {recoveryDetails?.duration || 0}m</div>
+                <div>Dist: {recoveryDetails?.distance || 0} {isImperialSetting ? 'mi' : 'km'}</div>
+                <div>Avg: {recoveryDetails?.avgSpeed || 0} {isImperialSetting ? 'mph' : 'kmh'}</div>
+                <div className="text-emerald-400">Burn: {recoveryDetails?.calories || 0} kCal</div>
+              </div>
+            </div>
+          )}
+
+          {/* Card Bottom Barcode */}
+          <div className="relative z-10 border-t border-white/5 pt-2 flex justify-between items-end px-2">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex gap-0.5 h-4 items-end opacity-85">
+                <div className="w-[1px] h-full bg-white" />
+                <div className="w-[2px] h-[80%] bg-white" />
+                <div className="w-[1px] h-full bg-white" />
+                <div className="w-[1px] h-[60%] bg-white" />
+                <div className="w-[3px] h-[90%] bg-white" />
+                <div className="w-[1px] h-[75%] bg-white" />
+                <div className="w-[1px] h-full bg-white" />
+              </div>
+              <span className="text-[4px] text-zinc-600 font-mono">FORMA-{Date.now().toString().slice(-6)}</span>
+            </div>
+            
+            <div className="text-right">
+              <span className="text-[4px] text-zinc-600 font-mono block">VERIFIED SESSION</span>
+              <span className="text-[5px] font-bold text-emerald-400 font-mono uppercase">COMPLETED</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Footer */}
+      <div className="flex flex-col gap-3 pb-2">
+        <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-white/[0.01] border border-white/5">
+          <ShieldCheck size={16} className="text-cyan-400 flex-shrink-0 mt-0.5 animate-pulse" />
+          <p className="text-[10px] text-zinc-500 leading-normal">
+            Export saves a portrait image (`1080x1920` png) of your workout details, perfect for sharing or logging.
+          </p>
+        </div>
+
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={triggerDownload}
+          className="w-full bg-white text-black font-semibold text-xs uppercase py-4 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg active-glow"
+        >
+          {downloaded ? (
+            <>
+              <Check size={14} className="text-emerald-500 stroke-[3px]" />
+              Share Card Exported
+            </>
+          ) : (
+            <>
+              <Download size={14} />
+              Export Portrait PNG (1080x1920)
+            </>
+          )}
+        </motion.button>
+      </div>
+    </div>
+  );
+}
