@@ -3,12 +3,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WorkoutSession, Exercise, LoggedSet } from '@/constants/workout';
-import { ArrowLeft, Check, Timer, ArrowRight, Zap, RefreshCw, CheckCircle2, Dumbbell } from 'lucide-react';
+import { ArrowLeft, Check, Timer, ArrowRight, Zap, RefreshCw, CheckCircle2, Dumbbell, Minus, Plus } from 'lucide-react';
+import ExerciseHistoryModal from '@/components/ExerciseHistoryModal';
+import { useApp } from '@/context/AppContext';
 
 interface CrucibleViewProps {
   session: WorkoutSession;
   onBack: () => void;
-  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }) => void;
+  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }, duration: number) => void;
   zeroUiEnabled: boolean;
   autoOverloadEnabled: boolean;
   onUpdateWeight: (exerciseId: string, newWeight: number) => void;
@@ -28,6 +30,7 @@ export default function CrucibleView({
   units,
   workoutHistory = []
 }: CrucibleViewProps) {
+  const { triggerHaptic } = useApp();
   const [currentExerciseIdx, setCurrentExerciseIdx] = useState(0);
   const [currentSetIdx, setCurrentSetIdx] = useState(0);
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
@@ -55,10 +58,19 @@ export default function CrucibleView({
   // Log state
   const [workoutLogs, setWorkoutLogs] = useState<{ [exId: string]: LoggedSet[] }>({});
   
+  // Confirmation states
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+
   // Timer state
   const [timerActive, setTimerActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(90);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Global elapsed workout timer state
+  const [elapsedTime, setElapsedTime] = useState(0);
+
+  // Exercise history modal state
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
 
   // Overload Alert
   const [overloadNotice, setOverloadNotice] = useState<string | null>(null);
@@ -81,21 +93,58 @@ export default function CrucibleView({
     }
   }, [currentExerciseIdx, currentSetIdx, zeroUiEnabled, currentExercise, cnsScale, units]);
 
+  const advanceWorkflow = () => {
+    if (currentSetIdx < totalSets - 1) {
+      setCurrentSetIdx(prev => prev + 1);
+    } else {
+      // Completed all sets for this exercise. If there is a next exercise, go to it.
+      if (currentExerciseIdx < session.exercises.length - 1) {
+        setDirection(1);
+        setCurrentExerciseIdx(prev => prev + 1);
+        setCurrentSetIdx(0);
+      } else {
+        // Workout fully complete! Show confirmation to finalize
+        setShowEndConfirm(true);
+      }
+    }
+  };
+
+  // Ref to always call latest version of advanceWorkflow from timer interval
+  const advanceWorkflowRef = useRef(advanceWorkflow);
+  useEffect(() => {
+    advanceWorkflowRef.current = advanceWorkflow;
+  }, [advanceWorkflow]);
+
   // Timer effect
   useEffect(() => {
-    if (timerActive && timeLeft > 0) {
-      timerRef.current = setTimeout(() => {
-        setTimeLeft(prev => prev - 1);
+    let intervalId: NodeJS.Timeout | null = null;
+    if (timerActive) {
+      intervalId = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            if (intervalId) clearInterval(intervalId);
+            setTimerActive(false);
+            triggerHaptic([30, 50, 30]); // double vibrate on rest timer completion
+            advanceWorkflowRef.current();
+            return 90;
+          }
+          return prev - 1;
+        });
       }, 1000);
-    } else if (timeLeft === 0 && timerActive) {
-      setTimerActive(false);
-      advanceWorkflow();
     }
 
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [timerActive, timeLeft]);
+  }, [timerActive]);
+
+  // Global elapsed workout timer effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsedTime(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogSet = () => {
     const parsedInputWeight = parseFloat(weight) || 0;
@@ -119,18 +168,10 @@ export default function CrucibleView({
 
     if (achievedOverload) {
       setShowOverloadGlow(true);
+      triggerHaptic([30, 50, 30]); // double vibrate on PR milestone
       setTimeout(() => setShowOverloadGlow(false), 2200);
-    }
-
-    // Auto-Regulated Overload Trigger Check
-    if (autoOverloadEnabled && parsedReps >= ghostSet.reps && rpe <= 7 && cnsScale >= 1.0) {
-      const nextWeight = weightInKg + 2.5;
-      onUpdateWeight(currentExercise.id, parseFloat(nextWeight.toFixed(1)));
-      const overloadWeightDisplay = units === 'imperial' 
-        ? `${(nextWeight * 2.20462).toFixed(1)} lbs` 
-        : `${nextWeight.toFixed(1)} kg`;
-      setOverloadNotice(`Auto-Overload Triggered: Baseline weight updated to ${overloadWeightDisplay} for next week.`);
-      setTimeout(() => setOverloadNotice(null), 4500);
+    } else {
+      triggerHaptic([40]); // standard vibrate on regular set log
     }
 
     const newSet: LoggedSet = {
@@ -140,30 +181,37 @@ export default function CrucibleView({
       rpe: rpe
     };
     
+    const updatedSets = [...(workoutLogs[currentExercise.id] || []), newSet];
     setWorkoutLogs(prev => ({
       ...prev,
-      [currentExercise.id]: [...(prev[currentExercise.id] || []), newSet]
+      [currentExercise.id]: updatedSets
     }));
+
+    // Auto-Regulated Overload Trigger Check (run only on last set, average RPE across all sets)
+    if (currentSetIdx === totalSets - 1 && autoOverloadEnabled && cnsScale >= 1.0) {
+      const totalRpe = updatedSets.reduce((sum, s) => sum + s.rpe, 0);
+      const avgRpe = totalRpe / updatedSets.length;
+      
+      const targetsMet = updatedSets.every((s, idx) => {
+        const targetReps = currentExercise.ghostSets[idx]?.reps || currentExercise.ghostSets[currentExercise.ghostSets.length - 1].reps;
+        return s.reps >= targetReps;
+      });
+
+      if (targetsMet && avgRpe <= 7) {
+        const nextWeight = weightInKg + 2.5;
+        onUpdateWeight(currentExercise.id, parseFloat(nextWeight.toFixed(1)));
+        const overloadWeightDisplay = units === 'imperial' 
+          ? `${(nextWeight * 2.20462).toFixed(1)} lbs` 
+          : `${nextWeight.toFixed(1)} kg`;
+        setOverloadNotice(`Auto-Overload Triggered! Avg RPE: ${avgRpe.toFixed(1)}. Next week baseline updated to ${overloadWeightDisplay}.`);
+        triggerHaptic([30, 50, 30]);
+        setTimeout(() => setOverloadNotice(null), 4500);
+      }
+    }
 
     // Enter Rest Timer
     setTimeLeft(90);
     setTimerActive(true);
-  };
-
-  const advanceWorkflow = () => {
-    if (currentSetIdx < totalSets - 1) {
-      setCurrentSetIdx(prev => prev + 1);
-    } else {
-      // Completed all sets for this exercise. If there is a next exercise, go to it.
-      if (currentExerciseIdx < session.exercises.length - 1) {
-        setDirection(1);
-        setCurrentExerciseIdx(prev => prev + 1);
-        setCurrentSetIdx(0);
-      } else {
-        // Workout fully complete! Trigger history log
-        onFinishWorkout(workoutLogs);
-      }
-    }
   };
 
   const handleNavigateToExercise = (index: number) => {
@@ -182,6 +230,19 @@ export default function CrucibleView({
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const formatElapsed = (secs: number) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    
+    const parts = [];
+    if (h > 0) parts.push(h);
+    parts.push(m < 10 && h > 0 ? `0${m}` : m);
+    parts.push(s < 10 ? `0${s}` : s);
+    
+    return parts.join(':');
   };
 
   const strokeDashoffset = 502.6 - (502.6 * (90 - timeLeft)) / 90;
@@ -216,7 +277,7 @@ export default function CrucibleView({
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <button 
-          onClick={onBack} 
+          onClick={() => setShowExitConfirm(true)} 
           className="p-2 -ml-2 text-zinc-500 hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft size={20} />
@@ -228,6 +289,12 @@ export default function CrucibleView({
           <h1 className="text-sm font-semibold text-white uppercase tracking-wider">
             {session.title} &mdash; {session.focus}
           </h1>
+          <div className="flex items-center justify-center gap-1 mt-0.5 text-zinc-500">
+            <Timer size={10} className="animate-pulse" />
+            <span className="text-[10px] font-mono tracking-wider tabular-nums font-bold">
+              {formatElapsed(elapsedTime)}
+            </span>
+          </div>
         </div>
         <div className="w-12 h-6 flex items-center justify-center rounded-full bg-white/5 border border-white/5 text-[10px] text-zinc-400 font-mono">
           {currentExerciseIdx + 1}/{session.exercises.length}
@@ -327,8 +394,14 @@ export default function CrucibleView({
                   )}
                 </div>
                 
-                <h2 className="text-2xl font-bold text-white tracking-tight mb-1">
+                <h2 
+                  onClick={() => setHistoryModalOpen(true)}
+                  className="text-2xl font-bold text-white tracking-tight mb-1 hover:text-cyan-400 transition-colors cursor-pointer flex items-center gap-2 group"
+                >
                   {currentExercise.name}
+                  <span className="text-[8px] uppercase tracking-wider text-zinc-500 font-mono font-bold border border-white/10 bg-white/5 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+                    History
+                  </span>
                 </h2>
                 <p className="text-xs text-zinc-400 font-semibold mb-4 uppercase tracking-wider">
                   Target Reps: <span className="text-white">{currentExercise.targetRepsRange}</span> &bull; Plan: <span className="text-white">{totalSets} Sets</span>
@@ -369,35 +442,69 @@ export default function CrucibleView({
 
               {/* Set Input values */}
               <div className="grid grid-cols-2 gap-4">
-                <div className="glass-panel rounded-2xl p-4 flex flex-col justify-center">
+                <div className="glass-panel rounded-2xl p-4 flex flex-col justify-center relative">
                   <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
                     Load ({units === 'imperial' ? 'lbs' : 'kg'})
                   </label>
-                  <div className="relative flex items-center">
+                  <div className="flex items-center justify-between mt-1">
+                    <button
+                      onClick={() => setWeight(prev => {
+                        const val = parseFloat(prev) || 0;
+                        const step = units === 'imperial' ? 5 : 2.5;
+                        return Math.max(0, val - step).toFixed(1);
+                      })}
+                      className="p-1.5 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+                    >
+                      <Minus size={12} />
+                    </button>
                     <input
                       type="number"
                       step="0.5"
                       value={weight}
                       onChange={(e) => setWeight(e.target.value)}
-                      className="w-full bg-transparent text-white font-bold text-3xl focus:outline-none tabular-nums"
+                      className="w-16 text-center bg-transparent text-white font-bold text-2xl focus:outline-none tabular-nums"
                     />
-                    {((units === 'imperial' ? (ghostSet.weight * cnsScale * 2.20462).toFixed(1) : (ghostSet.weight * cnsScale).toFixed(1)) !== weight) && (
-                      <button
-                        onClick={() => {
-                          const scaledW = ghostSet.weight * cnsScale;
-                          setWeight(units === 'imperial' ? (scaledW * 2.20462).toFixed(1) : scaledW.toFixed(1));
-                        }}
-                        className="absolute right-0 text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-                        title="Sync predicted"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setWeight(prev => {
+                        const val = parseFloat(prev) || 0;
+                        const step = units === 'imperial' ? 5 : 2.5;
+                        return (val + step).toFixed(1);
+                      })}
+                      className="p-1.5 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+                    >
+                      <Plus size={12} />
+                    </button>
                   </div>
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    <span className="text-[9px] text-zinc-600 font-semibold">
-                      Target: {units === 'imperial' ? `${(ghostSet.weight * 2.20462).toFixed(1)} lbs` : `${ghostSet.weight} kg`} {cnsScale < 1.0 ? '(Deload)' : ''}
-                    </span>
+                  <div className="flex gap-1 mt-2 justify-center">
+                    {(units === 'imperial' ? [5, 10, 25] : [2.5, 5, 10]).map(val => (
+                      <button
+                        key={val}
+                        onClick={() => setWeight(prev => {
+                          const currentVal = parseFloat(prev) || 0;
+                          return (currentVal + val).toFixed(1);
+                        })}
+                        className="px-1.5 py-0.5 text-[8px] font-mono border border-white/10 rounded bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
+                      >
+                        +{val}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-0.5 mt-2">
+                    <div className="flex justify-between items-center text-[9px] text-zinc-600 font-semibold">
+                      <span>Target: {units === 'imperial' ? `${(ghostSet.weight * 2.20462).toFixed(1)} lbs` : `${ghostSet.weight} kg`}</span>
+                      {((units === 'imperial' ? (ghostSet.weight * cnsScale * 2.20462).toFixed(1) : (ghostSet.weight * cnsScale).toFixed(1)) !== weight) && (
+                        <button
+                          onClick={() => {
+                            const scaledW = ghostSet.weight * cnsScale;
+                            setWeight(units === 'imperial' ? (scaledW * 2.20462).toFixed(1) : scaledW.toFixed(1));
+                          }}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer ml-1"
+                          title="Sync predicted"
+                        >
+                          <RefreshCw size={10} />
+                        </button>
+                      )}
+                    </div>
                     {prevBestSet && (
                       <span className="text-[9px] text-emerald-400/80 font-medium font-mono">
                         Prev: {units === 'imperial' ? `${(prevBestSet.weight * 2.20462).toFixed(1)} lbs` : `${prevBestSet.weight} kg`}
@@ -410,27 +517,45 @@ export default function CrucibleView({
                   <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
                     Reps
                   </label>
-                  <div className="relative flex items-center">
+                  <div className="flex items-center justify-between mt-1">
+                    <button
+                      onClick={() => setReps(prev => {
+                        const val = parseInt(prev) || 0;
+                        return Math.max(0, val - 1).toString();
+                      })}
+                      className="p-1.5 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+                    >
+                      <Minus size={12} />
+                    </button>
                     <input
                       type="number"
                       value={reps}
                       onChange={(e) => setReps(e.target.value)}
-                      className="w-full bg-transparent text-white font-bold text-3xl focus:outline-none tabular-nums"
+                      className="w-16 text-center bg-transparent text-white font-bold text-2xl focus:outline-none tabular-nums"
                     />
-                    {ghostSet.reps.toString() !== reps && (
-                      <button
-                        onClick={() => setReps(ghostSet.reps.toString())}
-                        className="absolute right-0 text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-                        title="Sync predicted"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setReps(prev => {
+                        const val = parseInt(prev) || 0;
+                        return (val + 1).toString();
+                      })}
+                      className="p-1.5 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+                    >
+                      <Plus size={12} />
+                    </button>
                   </div>
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    <span className="text-[9px] text-zinc-600 font-semibold">
-                      Target Setup: {ghostSet.reps} reps
-                    </span>
+                  <div className="flex flex-col gap-0.5 mt-5">
+                    <div className="flex justify-between items-center text-[9px] text-zinc-600 font-semibold">
+                      <span>Target: {ghostSet.reps} reps</span>
+                      {ghostSet.reps.toString() !== reps && (
+                        <button
+                          onClick={() => setReps(ghostSet.reps.toString())}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer ml-1"
+                          title="Sync predicted"
+                        >
+                          <RefreshCw size={10} />
+                        </button>
+                      )}
+                    </div>
                     {prevBestSet && (
                       <span className="text-[9px] text-emerald-400/80 font-medium font-mono">
                         Prev: {prevBestSet.reps} reps
@@ -565,13 +690,99 @@ export default function CrucibleView({
               : 'Cardio Finisher'}
           </div>
           <button
-            onClick={() => onFinishWorkout(workoutLogs)}
-            className="flex items-center gap-1 font-semibold text-white hover:text-zinc-300 transition-colors cursor-pointer"
+            onClick={() => setShowEndConfirm(true)}
+            className="flex items-center gap-1 font-semibold text-white hover:text-zinc-300 transition-colors cursor-pointer animate-pulse"
           >
             End workout <ArrowRight size={12} />
           </button>
         </div>
       )}
+
+      {/* Exercise History Per Movement Modal */}
+      <AnimatePresence>
+        {historyModalOpen && (
+          <ExerciseHistoryModal
+            isOpen={historyModalOpen}
+            onClose={() => setHistoryModalOpen(false)}
+            exerciseId={currentExercise.id}
+            exerciseName={currentExercise.name}
+            workoutHistory={workoutHistory}
+            units={units}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Exit Confirmation Modal */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass-panel border-white/10 bg-obsidian rounded-3xl p-6 max-w-sm w-full text-center relative z-50 shadow-2xl"
+            >
+              <h3 className="text-lg font-bold text-white mb-2">Pause & Exit Workout?</h3>
+              <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+                Your current sets logged will remain cached, but this session won't be finalized into your history ledger yet.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowExitConfirm(false)}
+                  className="flex-1 py-3 border border-white/5 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                >
+                  Keep Lifting
+                </button>
+                <button
+                  onClick={() => {
+                    setShowExitConfirm(false);
+                    onBack();
+                  }}
+                  className="flex-1 py-3 bg-red-500 hover:bg-red-400 text-white text-xs font-bold rounded-xl transition-all cursor-pointer active-glow shadow-lg shadow-red-500/20"
+                >
+                  Exit Session
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* End Confirmation Modal */}
+      <AnimatePresence>
+        {showEndConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass-panel border-white/10 bg-obsidian rounded-3xl p-6 max-w-sm w-full text-center relative z-50 shadow-2xl"
+            >
+              <h3 className="text-lg font-bold text-white mb-2">Finalize & Log Workout?</h3>
+              <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+                Ready to seal this training session? Your completed sets and volume tonnage will be saved to your ledger.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowEndConfirm(false)}
+                  className="flex-1 py-3 border border-white/5 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                >
+                  Keep Lifting
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEndConfirm(false);
+                    onFinishWorkout(workoutLogs, elapsedTime);
+                  }}
+                  className="flex-1 py-3 bg-white hover:bg-zinc-200 text-black text-xs font-bold rounded-xl transition-all cursor-pointer active-glow"
+                >
+                  Finalize Log
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

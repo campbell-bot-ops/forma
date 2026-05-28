@@ -1,14 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #020202;
-  --color-foreground: #F5F5F5;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   
-  --color-obsidian: #020202;
-  --color-surface: #0A0A0A;
-  --color-silver: #E2E2E2;
-  --color-navy-dark: #050B14;
-  --color-navy-light: #0B192C;
+  --color-obsidian: var(--obsidian);
+  --color-surface: var(--surface);
+  --color-silver: var(--silver);
+  --color-navy-dark: var(--navy-dark);
+  --color-navy-light: var(--navy-light);
+  
+  --color-card-1: var(--card-bg-1);
+  --color-card-2: var(--card-bg-2);
+  --color-card-3: var(--card-bg-3);
+  
+  --color-sleep-bg: var(--card-bg-sleep);
+  --color-sleep-text: var(--sleep-text);
+  --color-sleep-muted: var(--sleep-text-muted);
+  --color-sleep-icon-bg: var(--sleep-icon-bg);
+  --color-sleep-icon: var(--sleep-icon);
+  
+  --color-treadmill-bg: var(--card-bg-treadmill);
+  --color-treadmill-text: var(--treadmill-text);
+  --color-treadmill-muted: var(--treadmill-text-muted);
+  --color-treadmill-icon-bg: var(--treadmill-icon-bg);
+  --color-treadmill-icon: var(--treadmill-icon);
+  
+  --color-white-adj: var(--text-white-adj);
+  --color-zinc-300-adj: var(--text-zinc-300-adj);
+  --color-zinc-400-adj: var(--text-zinc-400-adj);
+  --color-zinc-500-adj: var(--text-zinc-500-adj);
   
   --font-sans: 'Poppins', sans-serif;
   --font-mono: 'Courier New', Courier, monospace;
@@ -18,10 +39,84 @@
   color-scheme: dark;
   --background: #020202;
   --foreground: #F5F5F5;
+  --obsidian: #020202;
+  --surface: #0A0A0A;
+  --silver: #E2E2E2;
+  --navy-dark: #050B14;
+  --navy-light: #0B192C;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-soft: rgba(255, 255, 255, 0.05);
+  
+  --panel-bg: rgba(10, 10, 10, 0.7);
+  --card-bg-1: #1c1c1e;
+  --card-bg-2: #121214;
+  --card-bg-3: #2a2b2d;
+  --card-bg-sleep: #5c3b9b;
+  --card-bg-treadmill: #064e43;
+  
+  --circle-track: #27272a;
+  
+  --sleep-text: #F5F5F5;
+  --sleep-text-muted: rgba(233, 213, 255, 0.6);
+  --sleep-icon-bg: #391e6b;
+  --sleep-icon: #FFFFFF;
+  
+  --treadmill-text: #F5F5F5;
+  --treadmill-text-muted: rgba(204, 251, 241, 0.6);
+  --treadmill-icon-bg: #042d26;
+  --treadmill-icon: #FFFFFF;
+  
+  --card-3-icon-bg: #1e1f21;
+  
+  --text-white-adj: #FFFFFF;
+  --text-zinc-300-adj: #d4d4d8;
+  --text-zinc-400-adj: #a1a1aa;
+  --text-zinc-500-adj: #71717a;
   
   /* Custom scrollbars */
   scrollbar-width: thin;
   scrollbar-color: #333333 transparent;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #F5F5F7; /* Apple style gray background */
+  --foreground: #1C1C1E; /* Dark charcoal text */
+  --obsidian: #F5F5F7;
+  --surface: #FFFFFF; /* Pure white card surfaces */
+  --silver: #1C1C1E;
+  --navy-dark: #F5F5F7;
+  --navy-light: #FFFFFF;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-soft: rgba(0, 0, 0, 0.04);
+  
+  --panel-bg: rgba(255, 255, 255, 0.8);
+  --card-bg-1: #FFFFFF;
+  --card-bg-2: #FFFFFF;
+  --card-bg-3: #E5E5EA; /* Light gray */
+  --card-bg-sleep: #E8DDFF; /* Light purple */
+  --card-bg-treadmill: #E2F6F0; /* Light teal */
+  
+  --circle-track: #E5E5EA;
+  
+  --sleep-text: #391e6b;
+  --sleep-text-muted: rgba(57, 30, 107, 0.6);
+  --sleep-icon-bg: #D6C2FF;
+  --sleep-icon: #391e6b;
+  
+  --treadmill-text: #042d26;
+  --treadmill-text-muted: rgba(4, 45, 38, 0.6);
+  --treadmill-icon-bg: #C1ECE0;
+  --treadmill-icon: #042d26;
+  
+  --card-3-icon-bg: #E5E5EA;
+  
+  --text-white-adj: #1C1C1E;
+  --text-zinc-300-adj: #27272a;
+  --text-zinc-400-adj: #52525b;
+  --text-zinc-500-adj: #71717a;
+  
+  scrollbar-color: #CCCCCC transparent;
 }
 
 body {
@@ -32,10 +127,10 @@ body {
 
 /* Glassmorphism Surface Utility */
 .glass-panel {
-  background: rgba(10, 10, 10, 0.7);
+  background: var(--panel-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
 }
 
 .glass-panel-glow {

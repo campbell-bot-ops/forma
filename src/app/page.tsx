@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { WorkoutSession } from '@/constants/workout';
-import { db, UserSession, UserProfile } from '@/utils/db';
+import { useApp } from '@/context/AppContext';
+import { db } from '@/utils/db';
 
 // Component Views
 import LoadingScreen from '@/components/LoadingScreen';
@@ -18,322 +18,80 @@ import ProfileView from '@/components/ProfileView';
 import BottomNav, { TabId } from '@/components/BottomNav';
 import ShareCardModal from '@/components/ShareCardModal';
 import CnsSurveyModal from '@/components/CnsSurveyModal';
+import ProgramEditor from '@/components/ProgramEditor';
+import OnboardingView from '@/components/OnboardingView';
 
 export default function Home() {
-  const [showLoading, setShowLoading] = useState(true);
-  const [user, setUser] = useState<UserSession | null>(null);
-  
-  const [activeTab, setActiveTab] = useState<TabId>('horizon');
-  const [activeSession, setActiveSession] = useState<WorkoutSession | null>(null);
-  const [activeRecoverySession, setActiveRecoverySession] = useState<WorkoutSession | null>(null);
-  const [activeRestSession, setActiveRestSession] = useState<WorkoutSession | null>(null);
-  const [activeFinisher, setActiveFinisher] = useState<boolean>(false);
-  
-  // Dynamic persistent states
-  const [sessions, setSessions] = useState<WorkoutSession[]>([]);
-  const [workoutHistory, setWorkoutHistory] = useState<any[]>([]);
-  const [zeroUiEnabled, setZeroUiEnabled] = useState(true);
-  const [autoOverloadEnabled, setAutoOverloadEnabled] = useState(true);
+  const {
+    showLoading,
+    setShowLoading,
+    user,
+    activeTab,
+    setActiveTab,
+    activeSession,
+    setActiveSession,
+    activeRecoverySession,
+    setActiveRecoverySession,
+    activeRestSession,
+    setActiveRestSession,
+    activeFinisher,
+    setActiveFinisher,
+    programEditorOpen,
+    setProgramEditorOpen,
+    sessions,
+    setSessions,
+    workoutHistory,
+    zeroUiEnabled,
+    autoOverloadEnabled,
+    userProfile,
+    recentCompletedWorkout,
+    shareModalOpen,
+    setShareModalOpen,
+    shareData,
+    setShareData,
+    cnsSurveyOpen,
+    setCnsSurveyOpen,
+    cnsScale,
+    completeCnsSurvey,
+    updateWeight,
+    finishWorkout,
+    logRecovery,
+    logRest,
+    completeFinisher,
+    loginSuccess,
+    triggerHaptic,
+    showOnboarding,
+    setShowOnboarding
+  } = useApp();
 
-  // Biometrics & Share states
-  const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: 'Alexander Thorne',
-    email: 'alex@forma.dev',
-    weight: 78.4,
-    height: 182,
-    bodyFat: 12.8,
-    units: 'metric'
-  });
-  const [recentCompletedWorkout, setRecentCompletedWorkout] = useState<any | null>(null);
-  const [shareModalOpen, setShareModalOpen] = useState(false);
-  const [shareData, setShareData] = useState<{
-    sessionTitle: string;
-    sessionFocus: string;
-    actualTonnage: number;
-    exerciseCount: number;
-    sessionType?: 'workout' | 'recovery';
-    logs?: any;
-    cardioDetails?: any;
-    recoveryDetails?: any;
-  } | null>(null);
+  const [prevTab, setPrevTab] = useState<TabId>('horizon');
 
-  // CNS Survey States
-  const [cnsSurveyOpen, setCnsSurveyOpen] = useState(false);
-  const [pendingSession, setPendingSession] = useState<WorkoutSession | null>(null);
-  const [cnsScale, setCnsScale] = useState(1.0);
-  const [cnsScore, setCnsScore] = useState(100);
-
-  // Load state on mount using the database helper
+  // Update previous tab index for directional sliding transitions
   useEffect(() => {
-    async function loadData() {
-      // 1. Check user session
-      const liveSession = await db.getLiveSession();
-      setUser(liveSession);
+    setPrevTab(activeTab);
+  }, [activeTab]);
 
-      // 2. Load workouts
-      const loadedSessions = await db.getSessions();
-      setSessions(loadedSessions);
-
-      // 3. Load completed history logs
-      const loadedHistory = await db.getHistory();
-      setWorkoutHistory(loadedHistory);
-
-      // 4. Load config options
-      const storedZeroUi = localStorage.getItem('forma_setting_zeroui');
-      const storedAutoOverload = localStorage.getItem('forma_setting_autooverload');
-      if (storedZeroUi !== null) setZeroUiEnabled(storedZeroUi === 'true');
-      if (storedAutoOverload !== null) setAutoOverloadEnabled(storedAutoOverload === 'true');
-
-      // 5. Load user biometrics profile
-      const storedProfile = await db.getUserProfile();
-      setUserProfile(storedProfile);
-    }
-
-    loadData();
-  }, []);
-
-  const handleStartWorkout = (session: WorkoutSession) => {
-    if (session.type === 'workout') {
-      setPendingSession(session);
-      setCnsSurveyOpen(true);
-    } else if (session.type === 'recovery') {
-      setActiveRecoverySession(session);
-    } else if (session.type === 'rest') {
-      setActiveRestSession(session);
-    }
+  const tabIndices: Record<TabId, number> = {
+    horizon: 0,
+    archive: 1,
+    profile: 2
   };
 
-  const handleCnsSurveyComplete = (score: number, scale: number) => {
-    setCnsScale(scale);
-    setCnsScore(score);
-    setCnsSurveyOpen(false);
-    if (pendingSession) {
-      setActiveSession(pendingSession);
-      setPendingSession(null);
-    }
-  };
+  const direction = tabIndices[activeTab] >= tabIndices[prevTab] ? 1 : -1;
 
-  // Weight target overload updates
-  const handleUpdateWeight = async (exerciseId: string, newWeight: number) => {
-    if (!activeSession) return;
-    
-    const updatedSessions = sessions.map(s => {
-      if (s.id === activeSession.id) {
-        const updatedExercises = s.exercises.map(ex => {
-          if (ex.id === exerciseId) {
-            const updatedGhost = ex.ghostSets.map(gs => ({
-              ...gs,
-              weight: newWeight
-            }));
-            return { ...ex, ghostSets: updatedGhost };
-          }
-          return ex;
-        });
-        return { ...s, exercises: updatedExercises };
-      }
-      return s;
-    });
-
-    setSessions(updatedSessions);
-    await db.saveSessions(updatedSessions);
-
-    // Sync active session weight
-    const currentActiveUpdated = updatedSessions.find(s => s.id === activeSession.id);
-    if (currentActiveUpdated) {
-      setActiveSession(currentActiveUpdated);
-    }
-  };
-
-  // Complete weights sessions
-  const handleFinishWorkout = async (logs: any) => {
-    if (!activeSession) return;
-
-    let actualTonnage = 0;
-    Object.keys(logs).forEach(exId => {
-      const sets = logs[exId];
-      sets.forEach((s: any) => {
-        actualTonnage += (s.weight || 0) * (s.reps || 0);
-      });
-    });
-
-    const completedWorkout = {
-      sessionId: activeSession.id,
-      sessionTitle: activeSession.title,
-      sessionFocus: activeSession.focus,
-      date: new Date().toISOString(),
-      actualTonnage: actualTonnage,
-      logs: logs,
-      cnsScore: cnsScore
-    };
-
-    const newHistory = await db.logWorkout(completedWorkout);
-    setWorkoutHistory(newHistory);
-    setRecentCompletedWorkout(completedWorkout);
-
-    // Advance to finisher cardio walker
-    setActiveSession(null);
-    setActiveFinisher(true);
-  };
-
-  // Complete active recovery days
-  const handleLogRecovery = async (logs: any) => {
-    if (!activeRecoverySession) return;
-
-    const completedRecovery = {
-      sessionId: activeRecoverySession.id,
-      sessionTitle: activeRecoverySession.title,
-      sessionFocus: activeRecoverySession.focus,
-      date: new Date().toISOString(),
-      actualTonnage: 0,
-      logs: {
-        'recovery-cardio': [
-          {
-            setNumber: 1,
-            weight: 0,
-            reps: logs.duration, // use reps for duration
-            rpe: logs.recoveryRate // use rpe for recovery index
-          }
-        ]
-      },
-      recoveryDetails: logs
-    };
-
-    const newHistory = await db.logWorkout(completedRecovery);
-    setWorkoutHistory(newHistory);
-    
-    // Close recovery screen and route to ledger
-    setActiveRecoverySession(null);
-    setActiveTab('archive');
-
-    // Trigger share modal for recovery day!
-    setShareData({
-      sessionTitle: completedRecovery.sessionTitle,
-      sessionFocus: completedRecovery.sessionFocus,
-      actualTonnage: 0,
-      exerciseCount: 0,
-      sessionType: 'recovery',
-      recoveryDetails: logs
-    });
-    setShareModalOpen(true);
-  };
-
-  // Complete rest days
-  const handleLogRest = async (logs: any) => {
-    if (!activeRestSession) return;
-
-    const completedRest = {
-      sessionId: activeRestSession.id,
-      sessionTitle: activeRestSession.title,
-      sessionFocus: activeRestSession.focus,
-      date: new Date().toISOString(),
-      actualTonnage: 0,
-      logs: {
-        'passive-rest': [
-          {
-            setNumber: 1,
-            weight: 0,
-            reps: logs.walkLogged ? 30 : 0, // walk duration
-            rpe: logs.stretchLogged ? 10 : 5 // stretching indicator
-          }
-        ]
-      },
-      restDetails: logs
-    };
-
-    const newHistory = await db.logWorkout(completedRest);
-    setWorkoutHistory(newHistory);
-    
-    // Close rest screen and route to ledger
-    setActiveRestSession(null);
-    setActiveTab('archive');
-  };
-
-  const handleCompleteFinisher = async (cardioStats?: {
-    duration: number;
-    distance: number;
-    calories: number;
-    speed: number;
-    incline: number;
-    units: 'metric' | 'imperial';
-  }) => {
-    setActiveFinisher(false);
-    setActiveTab('archive');
-    
-    if (recentCompletedWorkout) {
-      const updatedHistory = await db.updateWorkoutCardio(
-        recentCompletedWorkout.date,
-        recentCompletedWorkout.sessionId,
-        cardioStats
-      );
-      setWorkoutHistory(updatedHistory);
-
-      setShareData({
-        sessionTitle: recentCompletedWorkout.sessionTitle,
-        sessionFocus: recentCompletedWorkout.sessionFocus,
-        actualTonnage: recentCompletedWorkout.actualTonnage,
-        exerciseCount: recentCompletedWorkout.logs ? Object.keys(recentCompletedWorkout.logs).length : 0,
-        sessionType: 'workout',
-        logs: recentCompletedWorkout.logs,
-        cardioDetails: cardioStats
-      });
-      setShareModalOpen(true);
-    }
-  };
-
-  // Auth flow callbacks
-  const handleLoginSuccess = async (session: UserSession) => {
-    setUser(session);
-    const storedProfile = await db.getUserProfile();
-    setUserProfile(storedProfile);
-
-    // Reload splits and history for the newly logged-in user
-    const loadedSessions = await db.getSessions();
-    setSessions(loadedSessions);
-    const loadedHistory = await db.getHistory();
-    setWorkoutHistory(loadedHistory);
-  };
-
-  const handleSignOut = async () => {
-    await db.signOut();
-    setUser(null);
-    setSessions([]);
-    setWorkoutHistory([]);
-    setActiveTab('horizon');
-  };
-
-  const handleResetData = async () => {
-    await db.resetAll();
-    
-    // Reload reset sessions and history
-    const loadedSessions = await db.getSessions();
-    setSessions(loadedSessions);
-    setWorkoutHistory([]);
-    
-    // Reset settings states locally
-    setZeroUiEnabled(false);
-    setAutoOverloadEnabled(true);
-    
-    // Stay logged in, just route back to home
-    setActiveTab('horizon');
-  };
-
-  const handleUpdateProfile = async (profile: UserProfile) => {
-    setUserProfile(profile);
-    await db.saveUserProfile(profile);
-  };
-
-  const toggleZeroUi = async () => {
-    const nextVal = !zeroUiEnabled;
-    setZeroUiEnabled(nextVal);
-    localStorage.setItem('forma_setting_zeroui', String(nextVal));
-    await db.syncSettings(nextVal, autoOverloadEnabled);
-  };
-
-  const toggleAutoOverload = async () => {
-    const nextVal = !autoOverloadEnabled;
-    setAutoOverloadEnabled(nextVal);
-    localStorage.setItem('forma_setting_autooverload', String(nextVal));
-    await db.syncSettings(zeroUiEnabled, nextVal);
+  const slideVariants = {
+    enter: (dir: number) => ({
+      x: dir > 0 ? '100%' : '-100%',
+      opacity: 0
+    }),
+    center: {
+      x: 0,
+      opacity: 1
+    },
+    exit: (dir: number) => ({
+      x: dir < 0 ? '100%' : '-100%',
+      opacity: 0
+    })
   };
 
   const renderActiveView = () => {
@@ -343,7 +101,8 @@ export default function Home() {
           <HorizonView
             sessions={sessions}
             workoutHistory={workoutHistory}
-            onStartWorkout={handleStartWorkout}
+            onStartWorkout={setActiveSession}
+            onEditProgram={() => setProgramEditorOpen(true)}
             onShareWorkout={(session) => {
               setShareData({
                 sessionTitle: session.sessionTitle,
@@ -364,6 +123,7 @@ export default function Home() {
         return (
           <ArchiveView
             workoutHistory={workoutHistory}
+            units={userProfile.units || 'metric'}
             onShareWorkout={(session) => {
               setShareData({
                 sessionTitle: session.sessionTitle,
@@ -381,23 +141,14 @@ export default function Home() {
         );
       case 'profile':
         return (
-          <ProfileView
-            userProfile={userProfile}
-            onUpdateProfile={handleUpdateProfile}
-            zeroUiEnabled={zeroUiEnabled}
-            setZeroUiEnabled={toggleZeroUi}
-            autoOverloadEnabled={autoOverloadEnabled}
-            setAutoOverloadEnabled={toggleAutoOverload}
-            onResetData={handleResetData}
-            onSignOut={handleSignOut}
-          />
+          <ProfileView />
         );
       default:
         return (
           <HorizonView
             sessions={sessions}
             workoutHistory={workoutHistory}
-            onStartWorkout={handleStartWorkout}
+            onStartWorkout={setActiveSession}
           />
         );
     }
@@ -408,40 +159,65 @@ export default function Home() {
   return (
     <div className="bg-obsidian min-h-screen w-full text-foreground relative flex flex-col">
       <AnimatePresence mode="wait">
-        {/* 1. Loading Screen */}
-        {showLoading && (
-          <LoadingScreen key="loading" onFinished={() => setShowLoading(false)} />
-        )}
-
-        {/* 2. Login Screen */}
-        {!showLoading && user === null && (
+        {showLoading ? (
+          <LoadingScreen key="loading" onFinished={() => {
+            setShowLoading(false);
+            if (typeof window !== 'undefined') {
+              sessionStorage.setItem('forma_loading_shown', 'true');
+            }
+          }} />
+        ) : showOnboarding ? (
           <motion.div
-            key="signin"
+            key="onboarding"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="w-full h-full"
+            className="fixed inset-0 z-50 bg-obsidian"
           >
-            <SignInView onSuccess={handleLoginSuccess} />
+            <OnboardingView onFinished={() => {
+              setShowOnboarding(false);
+              localStorage.setItem('forma_first_visit_done', 'true');
+            }} />
           </motion.div>
-        )}
-
-        {/* 3. Main Dashboard */}
-        {showDashboard && !activeSession && !activeRecoverySession && !activeRestSession && !activeFinisher && (
+        ) : user === null ? (
           <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.25, ease: 'easeInOut' }}
-            className="w-full h-full"
+            key="auth-flow"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full h-full flex flex-col justify-center items-center"
           >
-            {renderActiveView()}
+            <SignInView onSuccess={loginSuccess} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="dashboard"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full h-full overflow-hidden relative flex-1 flex flex-col"
+          >
+            <AnimatePresence mode="wait" initial={false} custom={direction}>
+              <motion.div
+                key={activeTab}
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                className="w-full h-full flex-1"
+              >
+                {renderActiveView()}
+              </motion.div>
+            </AnimatePresence>
           </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* 4. Active Workout Overlay (Crucible) */}
-        {showDashboard && activeSession && (
+      {/* Overlays rendered on top of dashboard with individual transition elements */}
+      <AnimatePresence>
+        {user !== null && activeSession && (
           <motion.div
             key="crucible"
             layoutId={`workout-card-${activeSession.id}`}
@@ -454,19 +230,20 @@ export default function Home() {
             <CrucibleView
               session={activeSession}
               onBack={() => setActiveSession(null)}
-              onFinishWorkout={handleFinishWorkout}
+              onFinishWorkout={finishWorkout}
               zeroUiEnabled={zeroUiEnabled}
               autoOverloadEnabled={autoOverloadEnabled}
-              onUpdateWeight={handleUpdateWeight}
+              onUpdateWeight={updateWeight}
               cnsScale={cnsScale}
               units={userProfile.units || 'metric'}
               workoutHistory={workoutHistory}
             />
           </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* 5. Wednesday Recovery Logger View */}
-        {showDashboard && activeRecoverySession && (
+      <AnimatePresence>
+        {user !== null && activeRecoverySession && (
           <motion.div
             key="recovery-day"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -477,15 +254,16 @@ export default function Home() {
             <RecoveryView
               session={activeRecoverySession}
               onBack={() => setActiveRecoverySession(null)}
-              onLogRecovery={handleLogRecovery}
+              onLogRecovery={logRecovery}
               weight={userProfile.weight}
               units={userProfile.units || 'metric'}
             />
           </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* 6. Rest Day Logger View */}
-        {showDashboard && activeRestSession && (
+      <AnimatePresence>
+        {user !== null && activeRestSession && (
           <motion.div
             key="rest-day"
             initial={{ opacity: 0, scale: 0.95 }}
@@ -496,13 +274,14 @@ export default function Home() {
             <RestView
               session={activeRestSession}
               onBack={() => setActiveRestSession(null)}
-              onLogRest={handleLogRest}
+              onLogRest={logRest}
             />
           </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* 7. Cardio Finisher Overlay */}
-        {showDashboard && activeFinisher && (
+      <AnimatePresence>
+        {user !== null && activeFinisher && (
           <motion.div
             key="finisher"
             initial={{ opacity: 0 }}
@@ -512,7 +291,7 @@ export default function Home() {
             className="fixed inset-0 z-50 overflow-y-auto bg-[#050B14]"
           >
             <FinisherView 
-              onComplete={handleCompleteFinisher} 
+              onComplete={completeFinisher} 
               weight={userProfile.weight}
               units={userProfile.units || 'metric'}
             />
@@ -520,7 +299,29 @@ export default function Home() {
         )}
       </AnimatePresence>
 
-      {/* Floating Bottom Nav (hidden during workout/cardio/recovery/rest sessions) */}
+      <AnimatePresence>
+        {user !== null && programEditorOpen && (
+          <motion.div
+            key="program-editor"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-50 overflow-y-auto bg-obsidian"
+          >
+            <ProgramEditor
+              sessions={sessions}
+              onClose={() => setProgramEditorOpen(false)}
+              onSave={async (updatedSessions) => {
+                setSessions(updatedSessions);
+                await db.saveSessions(updatedSessions);
+              }}
+              units={userProfile.units || 'metric'}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Bottom Nav */}
       <BottomNav
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -529,7 +330,8 @@ export default function Home() {
           activeSession !== null ||
           activeRecoverySession !== null ||
           activeRestSession !== null ||
-          activeFinisher
+          activeFinisher ||
+          programEditorOpen
         }
       />
 
@@ -557,7 +359,7 @@ export default function Home() {
       <CnsSurveyModal
         isOpen={cnsSurveyOpen}
         onClose={() => setCnsSurveyOpen(false)}
-        onComplete={handleCnsSurveyComplete}
+        onComplete={completeCnsSurvey}
       />
     </div>
   );

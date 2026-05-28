@@ -43,7 +43,9 @@ export default function BottomNav({ activeTab, setActiveTab, disabled = false }:
                 />
               )}
               <motion.div
-                whileTap={{ scale: 0.9 }}
+                whileTap={{ scale: 0.85 }}
+                animate={{ scale: isActive ? 1.1 : 1 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 12 }}
                 className={`relative z-10 flex flex-col items-center gap-1 ${
                   isActive ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
                 }`}

@@ -1,18 +1,145 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, useMotionValue, useSpring, useTransform, AnimatePresence } from 'framer-motion';
-import { TrendingUp, BarChart2, ShieldAlert, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
+import { motion, useMotionValue, useSpring, useTransform, AnimatePresence, useInView } from 'framer-motion';
+import { TrendingUp, BarChart2, ShieldAlert, ChevronDown, ChevronUp, Share2, Award } from 'lucide-react';
 import { ARCHIVE_WEEKLY_AUDIT } from '@/constants/workout';
+
+const formatWorkoutDuration = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+};
+
+// Scroll Reveal Wrapper Component
+function ScrollReveal({ children }: { children: React.ReactNode }) {
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true, margin: '-20px' });
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: 30 }}
+      animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
+      transition={{ type: 'spring', stiffness: 100, damping: 15 }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// Stats Roll Up Counter Component
+interface CountUpProps {
+  value: string;
+}
+
+function CountUp({ value }: CountUpProps) {
+  const isPercent = value.includes('%');
+  const isPlus = value.startsWith('+');
+  const numericStr = value.replace(/[+%]/g, '');
+  const numericVal = parseFloat(numericStr);
+
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    if (isNaN(numericVal)) {
+      setDisplayValue(0);
+      return;
+    }
+    
+    let start = 0;
+    const end = numericVal;
+    const duration = 800; // 0.8s
+    const stepTime = 16;
+    const steps = duration / stepTime;
+    const increment = end / steps;
+    let step = 0;
+
+    const timer = setInterval(() => {
+      step++;
+      start += increment;
+      if (step >= steps) {
+        setDisplayValue(end);
+        clearInterval(timer);
+      } else {
+        setDisplayValue(start);
+      }
+    }, stepTime);
+
+    return () => clearInterval(timer);
+  }, [numericVal]);
+
+  if (isNaN(numericVal)) {
+    return <span>{value}</span>;
+  }
+
+  const formattedNum = displayValue.toFixed(1);
+  return (
+    <span>
+      {isPlus ? '+' : ''}
+      {formattedNum}
+      {isPercent ? '%' : ''}
+    </span>
+  );
+}
+
+import ExerciseHistoryModal from '@/components/ExerciseHistoryModal';
 
 interface ArchiveViewProps {
   workoutHistory: any[];
   onShareWorkout?: (session: any) => void;
+  units?: 'metric' | 'imperial';
 }
 
-export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveViewProps) {
+export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'metric' }: ArchiveViewProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<{ id: string; name: string } | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<'timeline' | 'prWall'>('timeline');
+
+  const calculatePersonalRecords = (history: any[]) => {
+    const prs: { [exId: string]: any } = {};
+    
+    history.forEach(log => {
+      if (log.logs) {
+        Object.keys(log.logs).forEach(exId => {
+          const sets = log.logs[exId];
+          if (Array.isArray(sets)) {
+            sets.forEach((set: any) => {
+              const weight = set.weight || 0;
+              const reps = set.reps || 0;
+              const est1RM = reps > 0 ? weight / (1.0278 - 0.0278 * reps) : 0;
+              
+              if (!prs[exId]) {
+                prs[exId] = {
+                  exerciseId: exId,
+                  exerciseName: exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                  maxWeight: weight,
+                  maxWeightDate: log.date,
+                  max1RM: est1RM,
+                  max1RMDate: log.date
+                };
+              } else {
+                const current = prs[exId];
+                if (weight > current.maxWeight) {
+                  current.maxWeight = weight;
+                  current.maxWeightDate = log.date;
+                }
+                if (est1RM > current.max1RM) {
+                  current.max1RM = est1RM;
+                  current.max1RMDate = log.date;
+                }
+              }
+            });
+          }
+        });
+      }
+    });
+    
+    return Object.values(prs).sort((a: any, b: any) => a.exerciseName.localeCompare(b.exerciseName)) as any[];
+  };
+
+  const personalRecords = calculatePersonalRecords(workoutHistory);
 
   // Motion values for 3D card tilt
   const x = useMotionValue(0);
@@ -168,10 +295,10 @@ export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveV
     >
       {/* Title */}
       <div className="text-center py-2">
-        <h1 className="text-xl font-bold tracking-tight text-white uppercase">
+        <h1 className="text-xl font-bold tracking-tight text-white-adj uppercase">
           Workout History
         </h1>
-        <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-medium">
+        <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500-adj font-medium">
           Workout History Logs
         </p>
       </div>
@@ -234,24 +361,24 @@ export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveV
               {/* Card Content Top */}
               <div className="relative z-10">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                  <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                     WORKOUT SUMMARY
                   </span>
-                  <span className="text-[8px] text-zinc-400 bg-white/5 border border-white/5 rounded-full px-2 py-0.5 uppercase tracking-wider font-mono">
+                  <span className="text-[8px] text-zinc-400-adj bg-white/5 border border-foreground/5 rounded-full px-2 py-0.5 uppercase tracking-wider font-mono">
                     {isHistoryEmpty ? 'PROJECTION' : 'LIVE DATA'}
                   </span>
                 </div>
-                <h2 className="text-lg font-bold text-white tracking-tight">
+                <h2 className="text-lg font-bold text-white-adj tracking-tight">
                   Workout Progress
                 </h2>
-                <p className="text-[10px] text-zinc-400">
+                <p className="text-[10px] text-zinc-400-adj">
                   {isHistoryEmpty 
                     ? 'Estimated goals based on your weekly schedule'
                     : 'Real stats from your workout history'
                   }
                 </p>
               </div>
-
+ 
               {/* Layer 3: High Contrast Stats Overlay */}
               <motion.div
                 style={{
@@ -262,24 +389,24 @@ export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveV
                 className="relative z-20 flex items-end justify-between"
               >
                 <div>
-                  <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
+                  <p className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold mb-1">
                     Estimated Strength
                   </p>
-                  <p className="text-4xl font-extrabold text-white tracking-tight tabular-nums">
-                    {strengthGainedText}
+                  <p className="text-4xl font-extrabold text-white-adj tracking-tight tabular-nums">
+                    <CountUp value={strengthGainedText} />
                   </p>
                 </div>
-
+ 
                 <div className="text-right">
-                  <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
+                  <p className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold mb-1">
                     Workout Consistency
                   </p>
-                  <p className="text-xl font-bold text-white tabular-nums">
-                    {volumeConsistencyText}
+                  <p className="text-xl font-bold text-white-adj tabular-nums">
+                    <CountUp value={volumeConsistencyText} />
                   </p>
                 </div>
               </motion.div>
-
+ 
               <div className="absolute bottom-2 left-0 right-0 text-center pointer-events-none">
                 <span className="text-[8px] text-zinc-600 uppercase tracking-widest font-semibold">
                   {hasOrientation ? 'Tilt Device Active' : 'Hover Card to Rotate 3D'}
@@ -287,34 +414,34 @@ export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveV
               </div>
             </motion.div>
           </motion.div>
-
+ 
           {/* Grid of Key Sub-Metrics */}
           <motion.div variants={itemVariants} className="grid grid-cols-2 gap-4 w-full">
             <div className="glass-panel rounded-2xl p-5 flex flex-col justify-between h-[120px]">
-              <div className="flex items-center justify-between text-zinc-500">
+              <div className="flex items-center justify-between text-zinc-500-adj">
                 <span className="text-[9px] uppercase tracking-wider font-bold">Strength Progress</span>
-                <TrendingUp size={16} className="text-white" />
+                <TrendingUp size={16} className="text-white-adj" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-white tabular-nums">
-                  {strengthGainedText}
+                <h3 className="text-2xl font-bold text-white-adj tabular-nums">
+                  <CountUp value={strengthGainedText} />
                 </h3>
-                <p className="text-[10px] text-zinc-500 mt-1 font-light leading-snug">
+                <p className="text-[10px] text-zinc-500-adj mt-1 font-light leading-snug">
                   Your estimated progress over time
                 </p>
               </div>
             </div>
-
+ 
             <div className="glass-panel rounded-2xl p-5 flex flex-col justify-between h-[120px]">
-              <div className="flex items-center justify-between text-zinc-500">
+              <div className="flex items-center justify-between text-zinc-500-adj">
                 <span className="text-[9px] uppercase tracking-wider font-bold">Weight Lifted</span>
-                <BarChart2 size={16} className="text-white" />
+                <BarChart2 size={16} className="text-white-adj" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-white tabular-nums">
-                  {tonnageChangeText}
+                <h3 className="text-2xl font-bold text-white-adj tabular-nums">
+                  <CountUp value={tonnageChangeText} />
                 </h3>
-                <p className="text-[10px] text-zinc-500 mt-1 font-light leading-snug">
+                <p className="text-[10px] text-zinc-500-adj mt-1 font-light leading-snug">
                   Total weight lifted compared to last week
                 </p>
               </div>
@@ -513,104 +640,269 @@ export default function ArchiveView({ workoutHistory, onShareWorkout }: ArchiveV
 
       </div>
 
-      {/* Timeline of Completed Workout Logs */}
-      {!isHistoryEmpty && (
-        <motion.div variants={itemVariants} className="flex flex-col gap-3 w-full">
-          <span className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase px-1">
-            Workout Logs
-          </span>
+      {/* Timeline of Completed Workout Logs & PR Wall Toggle */}
+      {!isHistoryEmpty ? (
+        <motion.div variants={itemVariants} className="flex flex-col gap-4 w-full">
+          <div className="flex items-center justify-between border-b border-white/5 pb-2 px-1">
+            <span className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase">
+              {activeSubTab === 'timeline' ? 'Workout Logs' : 'Personal Records Wall'}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setActiveSubTab('timeline')}
+                className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeSubTab === 'timeline'
+                    ? 'bg-white text-black font-extrabold shadow'
+                    : 'text-zinc-500 hover:text-zinc-300-adj'
+                }`}
+              >
+                Timeline
+              </button>
+              <button
+                onClick={() => setActiveSubTab('prWall')}
+                className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                  activeSubTab === 'prWall'
+                    ? 'bg-white text-black font-extrabold shadow'
+                    : 'text-zinc-500 hover:text-zinc-300-adj'
+                }`}
+              >
+                PR Wall
+              </button>
+            </div>
+          </div>
 
-          <div className="flex flex-col gap-3 w-full">
-            {workoutHistory.map((historyItem: any, idx: number) => {
-              const uniqueId = `${historyItem.date}-${idx}`;
-              const isExpanded = expandedLogId === uniqueId;
-              const completedDate = new Date(historyItem.date).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              });
+          {activeSubTab === 'timeline' ? (
+            <div className="flex flex-col gap-3 w-full">
+              {workoutHistory.map((historyItem: any, idx: number) => {
+                const uniqueId = `${historyItem.date}-${idx}`;
+                const isExpanded = expandedLogId === uniqueId;
+                const completedDate = new Date(historyItem.date).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
 
-              return (
-                <div key={uniqueId} className="glass-panel rounded-xl p-4 flex flex-col gap-2 w-full">
-                  <div 
-                    onClick={() => toggleExpandLog(uniqueId)}
-                    className="flex justify-between items-center cursor-pointer"
-                  >
-                    <div>
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wide">
-                        {historyItem.sessionTitle} &mdash; {historyItem.sessionFocus}
-                      </h4>
-                      <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
-                        {completedDate}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-mono font-bold text-white tabular-nums">
-                        {historyItem.actualTonnage.toLocaleString()} kg
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onShareWorkout) {
-                            onShareWorkout(historyItem);
-                          }
-                        }}
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-white bg-white/5 border border-white/5 transition-colors cursor-pointer"
-                        title="Share Workout"
+                return (
+                  <ScrollReveal key={uniqueId}>
+                    <div className="glass-panel rounded-xl p-4 flex flex-col gap-2 w-full">
+                      <div 
+                        onClick={() => toggleExpandLog(uniqueId)}
+                        className="flex justify-between items-center cursor-pointer"
                       >
-                        <Share2 size={12} />
-                      </button>
-                      {isExpanded ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
-                    </div>
-                  </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white-adj uppercase tracking-wide">
+                            {historyItem.sessionTitle} &mdash; {historyItem.sessionFocus}
+                          </h4>
+                          <p className="text-[9px] text-zinc-500 font-mono mt-0.5 flex items-center gap-1.5">
+                            <span>{completedDate}</span>
+                            {historyItem.cardioDetails?.workoutDuration && (
+                              <>
+                                <span className="text-zinc-700">&bull;</span>
+                                <span className="text-zinc-400">
+                                  ⏱️ {formatWorkoutDuration(historyItem.cardioDetails.workoutDuration)}
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
 
-                  {/* Expanded Detail logs showing individual sets */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden pt-2 border-t border-white/5 mt-1"
-                      >
-                        <table className="w-full text-left text-[10px] text-zinc-400">
-                          <thead>
-                            <tr className="border-b border-white/5 text-zinc-500 font-bold uppercase tracking-wider">
-                              <th className="py-1">Exercise</th>
-                              <th className="py-1 text-center">Set</th>
-                              <th className="py-1 text-right">Load</th>
-                              <th className="py-1 text-right">Reps</th>
-                              <th className="py-1 text-right">RPE</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.keys(historyItem.logs).map((exId) => {
-                              const sets = historyItem.logs[exId];
-                              return sets.map((set: any, setIdx: number) => (
-                                <tr key={`${exId}-${setIdx}`} className="border-b border-white/5 hover:bg-white/[0.01]">
-                                  <td className="py-1 text-white truncate max-w-[120px] font-medium">
-                                    {setIdx === 0 ? exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''}
-                                  </td>
-                                  <td className="py-1 text-center font-mono">{set.setNumber}</td>
-                                  <td className="py-1 text-right font-mono text-white tabular-nums">{set.weight} kg</td>
-                                  <td className="py-1 text-right font-mono text-white tabular-nums">{set.reps}</td>
-                                  <td className="py-1 text-right font-mono text-white tabular-nums">{set.rpe}</td>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] font-mono font-bold text-white-adj tabular-nums">
+                            {historyItem.actualTonnage.toLocaleString()} kg
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onShareWorkout) {
+                                onShareWorkout(historyItem);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-white-adj bg-white/5 border border-white/5 transition-colors cursor-pointer"
+                            title="Share Workout"
+                          >
+                            <Share2 size={12} />
+                          </button>
+                          {isExpanded ? <ChevronUp size={14} className="text-zinc-500" /> : <ChevronDown size={14} className="text-zinc-500" />}
+                        </div>
+                      </div>
+
+                      {/* Expanded Detail logs showing individual sets */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="overflow-hidden pt-2 border-t border-white/5 mt-1"
+                          >
+                            <table className="w-full text-left text-[10px] text-zinc-400">
+                              <thead>
+                                <tr className="border-b border-white/5 text-zinc-500 font-bold uppercase tracking-wider">
+                                  <th className="py-1">Exercise</th>
+                                  <th className="py-1 text-center">Set</th>
+                                  <th className="py-1 text-right">Load</th>
+                                  <th className="py-1 text-right">Reps</th>
+                                  <th className="py-1 text-right">RPE</th>
                                 </tr>
-                              ));
-                            })}
-                          </tbody>
-                        </table>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                              </thead>
+                              <tbody>
+                                {Object.keys(historyItem.logs).map((exId) => {
+                                  const sets = historyItem.logs[exId];
+                                  return sets.map((set: any, setIdx: number) => (
+                                    <tr key={`${exId}-${setIdx}`} className="border-b border-white/5 hover:bg-white/[0.01]">
+                                      <td 
+                                        className={`py-1 text-white-adj truncate max-w-[120px] font-medium ${setIdx === 0 ? 'hover:text-cyan-400 cursor-pointer transition-colors' : ''}`}
+                                        onClick={() => {
+                                          if (setIdx === 0) {
+                                            setSelectedExercise({
+                                              id: exId,
+                                              name: exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                                            });
+                                          }
+                                        }}
+                                      >
+                                        {setIdx === 0 ? exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''}
+                                      </td>
+                                      <td className="py-1 text-center font-mono">{set.setNumber}</td>
+                                      <td className="py-1 text-right font-mono text-white-adj tabular-nums">{set.weight} kg</td>
+                                      <td className="py-1 text-right font-mono text-white-adj tabular-nums">{set.reps}</td>
+                                      <td className="py-1 text-right font-mono text-white-adj tabular-nums">{set.rpe}</td>
+                                    </tr>
+                                  ));
+                                })}
+                              </tbody>
+                            </table>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </ScrollReveal>
+                );
+              })}
+            </div>
+          ) : (
+            /* PR Wall View */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+              {personalRecords.length > 0 ? (
+                personalRecords.map((pr) => {
+                  const displayMaxWeight = units === 'imperial' ? (pr.maxWeight * 2.20462).toFixed(1) : pr.maxWeight.toFixed(1);
+                  const displayMax1RM = units === 'imperial' ? (pr.max1RM * 2.20462).toFixed(1) : pr.max1RM.toFixed(1);
+                  const unitLabel = units === 'imperial' ? 'lbs' : 'kg';
+                  
+                  const maxWeightDateStr = new Date(pr.maxWeightDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                  const max1RMDateStr = new Date(pr.max1RMDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+                  return (
+                    <ScrollReveal key={pr.exerciseId}>
+                      <div className="glass-panel rounded-xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition-all duration-300">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="text-xs font-bold text-white-adj uppercase tracking-wide truncate max-w-[150px] sm:max-w-[180px]">
+                            {pr.exerciseName}
+                          </h4>
+                          <Award size={14} className="text-amber-400 fill-amber-400/10" />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3 border-t border-white/5 pt-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                              Absolute Max
+                            </span>
+                            <span className="text-sm font-bold text-white-adj font-mono">
+                              {displayMaxWeight} {unitLabel}
+                            </span>
+                            <span className="text-[7px] text-zinc-500 mt-0.5 font-mono">
+                              {maxWeightDateStr}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-col gap-0.5 border-l border-white/5 pl-3">
+                            <span className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                              Est. 1RM Max
+                            </span>
+                            <span className="text-sm font-bold text-cyan-400 font-mono">
+                              {displayMax1RM} {unitLabel}
+                            </span>
+                            <span className="text-[7px] text-zinc-500 mt-0.5 font-mono">
+                              {max1RMDateStr}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </ScrollReveal>
+                  );
+                })
+              ) : (
+                <div className="col-span-1 sm:col-span-2 glass-panel rounded-xl py-12 text-center text-zinc-500 italic text-[11px]">
+                  No personal records detected. Log workouts with weight and reps to build your PR wall!
                 </div>
-              );
-            })}
+              )}
+            </div>
+          )}
+        </motion.div>
+      ) : (
+        /* Skeletons and Empty State Fallback */
+        <motion.div variants={itemVariants} className="flex flex-col gap-6 w-full items-center justify-center py-6 text-center">
+          {/* Skeletons to mimic the layout cards loading */}
+          <div className="w-full flex flex-col gap-3">
+            <span className="text-[10px] font-bold tracking-widest text-zinc-600 uppercase text-left px-1">
+              Workout Logs (Simulation)
+            </span>
+            <div className="glass-panel rounded-2xl p-4 w-full flex flex-col gap-3 animate-pulse opacity-50">
+              <div className="flex justify-between items-center">
+                <div className="h-3 w-32 bg-white/10 rounded animate-shimmer" />
+                <div className="h-3 w-16 bg-white/10 rounded animate-shimmer" />
+              </div>
+              <div className="h-[1px] bg-white/5" />
+              <div className="flex justify-between items-center">
+                <div className="h-4 w-24 bg-white/10 rounded animate-shimmer" />
+                <div className="h-4 w-12 bg-white/10 rounded animate-shimmer" />
+              </div>
+            </div>
+            <div className="glass-panel rounded-2xl p-4 w-full flex flex-col gap-3 animate-pulse opacity-25">
+              <div className="flex justify-between items-center">
+                <div className="h-3 w-28 bg-white/10 rounded animate-shimmer" />
+                <div className="h-3 w-20 bg-white/10 rounded animate-shimmer" />
+              </div>
+              <div className="h-[1px] bg-white/5" />
+              <div className="flex justify-between items-center">
+                <div className="h-4 w-36 bg-white/10 rounded animate-shimmer" />
+                <div className="h-4 w-16 bg-white/10 rounded animate-shimmer" />
+              </div>
+            </div>
+          </div>
+
+          <div className="h-[1px] bg-white/5 w-full my-2" />
+
+          {/* Premium Empty State Graphic */}
+          <div className="flex flex-col items-center justify-center p-8 glass-panel rounded-3xl bg-white/[0.01] border-white/5 w-full max-w-sm">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" className="text-zinc-600 mb-4 stroke-zinc-700 animate-bounce">
+              <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="1" strokeDasharray="3 3" />
+              <path d="M12 8v8M8 12h8" strokeWidth="1" strokeLinecap="round" />
+            </svg>
+            <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-1">
+              Ledger is Empty
+            </h3>
+            <p className="text-[10px] text-zinc-500 max-w-[240px] leading-relaxed mb-4">
+              Your workouts, splits, and biometrics history will appear here once you finalize a training session.
+            </p>
           </div>
         </motion.div>
       )}
+
+      {/* Exercise History Modal */}
+      <AnimatePresence>
+        {selectedExercise && (
+          <ExerciseHistoryModal
+            isOpen={!!selectedExercise}
+            onClose={() => setSelectedExercise(null)}
+            exerciseId={selectedExercise.id}
+            exerciseName={selectedExercise.name}
+            workoutHistory={workoutHistory}
+            units={units}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

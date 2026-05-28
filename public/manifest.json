@@ -1,0 +1,18 @@
+{
+  "name": "FORMA — Performance Architecture",
+  "short_name": "FORMA",
+  "description": "Precision Recomposition for the Creative Class. Minimalist, auto-regulated overload engine.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020202",
+  "theme_color": "#020202",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

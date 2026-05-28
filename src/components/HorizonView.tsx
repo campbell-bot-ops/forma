@@ -3,7 +3,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WorkoutSession } from '@/constants/workout';
-import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle, Droplet } from 'lucide-react';
 import { UserProfile } from '@/utils/db';
 import Image from 'next/image';
 
@@ -151,19 +151,29 @@ interface HorizonViewProps {
   onStartWorkout: (session: WorkoutSession) => void;
   onShareWorkout?: (session: any) => void;
   userProfile?: UserProfile;
+  onEditProgram?: () => void;
 }
 
-export default function HorizonView({ sessions, workoutHistory, onStartWorkout, onShareWorkout, userProfile }: HorizonViewProps) {
+export default function HorizonView({ sessions, workoutHistory, onStartWorkout, onShareWorkout, userProfile, onEditProgram }: HorizonViewProps) {
   const [quoteIdx, setQuoteIdx] = React.useState(getDayOfYearIndex());
   const [sleepHours, setSleepHours] = React.useState<number>(8.0);
   const [isSleepModalOpen, setIsSleepModalOpen] = React.useState(false);
+  const [waterIntake, setWaterIntake] = React.useState<number>(0);
+  const [activeTab, setActiveTab] = React.useState<0 | 1>(0);
+  const waterTarget = 3.0; // 3 Liters
 
-  // Sync sleepHours from localStorage
+  // Sync sleepHours and waterIntake from localStorage
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('forma_sleep_hours');
-      if (stored) {
-        setSleepHours(parseFloat(stored));
+      const storedSleep = localStorage.getItem('forma_sleep_hours');
+      if (storedSleep) {
+        setSleepHours(parseFloat(storedSleep));
+      }
+      
+      const todayStr = new Date().toDateString();
+      const storedWater = localStorage.getItem(`forma_water_intake_${todayStr}`);
+      if (storedWater) {
+        setWaterIntake(parseFloat(storedWater));
       }
     }
   }, []);
@@ -175,6 +185,66 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
       localStorage.setItem('forma_sleep_hours', newSleep.toFixed(1));
     }
   };
+
+  const adjustWater = (amount: number) => {
+    const newIntake = Math.max(0, waterIntake + amount);
+    setWaterIntake(newIntake);
+    if (typeof window !== 'undefined') {
+      const todayStr = new Date().toDateString();
+      localStorage.setItem(`forma_water_intake_${todayStr}`, newIntake.toFixed(2));
+    }
+  };
+
+  const calculateWorkoutStreak = (history: any[]): number => {
+    if (!history || history.length === 0) return 0;
+    
+    // Group workouts with actualTonnage > 0 by calendar week (Monday as start)
+    const workoutsByWeek = new Map<string, number>();
+    
+    history.forEach(log => {
+      if (log.actualTonnage && log.actualTonnage > 0) {
+        const logDate = new Date(log.date);
+        const day = logDate.getDay();
+        const diff = logDate.getDate() - day + (day === 0 ? -6 : 1);
+        const startOfWeek = new Date(logDate.setDate(diff));
+        startOfWeek.setHours(0, 0, 0, 0);
+        const weekKey = startOfWeek.toDateString();
+        workoutsByWeek.set(weekKey, (workoutsByWeek.get(weekKey) || 0) + 1);
+      }
+    });
+
+    // Current week Monday
+    const today = new Date();
+    const todayDay = today.getDay();
+    const todayDiff = today.getDate() - todayDay + (todayDay === 0 ? -6 : 1);
+    const currentWeekMonday = new Date(today.setDate(todayDiff));
+    currentWeekMonday.setHours(0, 0, 0, 0);
+
+    let streak = 0;
+    let checkWeek = new Date(currentWeekMonday);
+    
+    // Check current week
+    const currentWeekCount = workoutsByWeek.get(checkWeek.toDateString()) || 0;
+    if (currentWeekCount >= 4) {
+      streak++;
+    }
+    
+    // Check previous weeks
+    while (true) {
+      checkWeek.setDate(checkWeek.getDate() - 7);
+      const weekKey = checkWeek.toDateString();
+      const count = workoutsByWeek.get(weekKey) || 0;
+      if (count >= 4) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  };
+
+  const workoutStreak = calculateWorkoutStreak(workoutHistory);
 
   const handleCycleQuote = () => {
     setQuoteIdx((prev) => (prev + 1) % MOTIVATIONAL_QUOTES.length);
@@ -194,6 +264,13 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
     if (score >= 70) return 'cyan-glow';
     if (score >= 40) return 'amber-glow';
     return 'crimson-glow';
+  };
+
+  const getMuscleClass = (muscleName: string) => {
+    const score = recovery[muscleName] !== undefined ? recovery[muscleName] : 100;
+    if (score >= 70) return 'muscle-cyan';
+    if (score >= 40) return 'muscle-amber';
+    return 'muscle-crimson';
   };
 
   // If sessions haven't loaded yet, return safety default
@@ -329,7 +406,8 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
       className="pb-36 pt-6 px-4 max-w-md md:max-w-4xl lg:max-w-5xl mx-auto flex flex-col gap-6"
     >
       {/* Brand Header Logo */}
-      <div className="flex flex-col items-center justify-center py-3">
+      <div className="flex items-center justify-between py-3 px-1 border-b border-white/5">
+        <div className="w-16" /> {/* spacer for balance */}
         <Image
           src="/Frame 166.png"
           alt="FORMA Logo"
@@ -337,8 +415,18 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
           height={28}
           priority
           style={{ height: 'auto' }}
-          className="h-7 w-auto object-contain"
+          className="h-7 w-auto object-contain animate-fade-in"
         />
+        {onEditProgram ? (
+          <button
+            onClick={onEditProgram}
+            className="px-2.5 py-1 rounded-lg text-zinc-400 hover:text-white bg-white/5 border border-white/10 hover:border-white/20 transition-all cursor-pointer text-[9px] font-bold uppercase tracking-wider font-mono shadow-sm"
+          >
+            Edit Split
+          </button>
+        ) : (
+          <div className="w-16" />
+        )}
       </div>
 
       {/* Responsive Dashboard Split Grid (stacked on mobile, side-by-side on desktop) */}
@@ -347,133 +435,312 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
         {/* Left Column: Bento Box + Heatmap */}
         <div className="col-span-12 md:col-span-6 lg:col-span-7 flex flex-col gap-6 w-full">
           
-          {/* Dynamic Performance Bento Box Grid */}
-          <motion.div variants={itemVariants} className="grid grid-cols-12 gap-3 sm:gap-4 w-full">
+          {/* Dynamic Performance Bento Box Grid with Switcher */}
+          <motion.div variants={itemVariants} className="w-full flex flex-col gap-2">
             
-            {/* Left Bento Card: Weekly Progress Circle Map */}
-            <div className="col-span-5 bg-[#1c1c1e] rounded-[24px] sm:rounded-[28px] p-3 sm:p-5 flex flex-col items-center justify-center min-h-[180px] sm:min-h-[216px] relative overflow-hidden">
-              {/* Circular progress SVG */}
-              <div className="relative flex items-center justify-center">
-                <svg className="w-full h-auto max-w-[124px] sm:max-w-[150px] aspect-square" viewBox="0 0 128 128">
-                  <defs>
-                    <path id="top-curve" d="M 20,64 A 44,44 0 0,1 108,64" fill="transparent" />
-                    <path id="bottom-curve" d="M 108,64 A 44,44 0 0,1 20,64" fill="transparent" />
-                  </defs>
-                  {/* Background track */}
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r="54"
-                    className="stroke-zinc-800 fill-transparent"
-                    strokeWidth="11"
-                  />
-                  {/* Progress indicator */}
-                  <circle
-                    cx="64"
-                    cy="64"
-                    r="54"
-                    className="stroke-white fill-transparent"
-                    strokeWidth="11"
-                    strokeDasharray="339.3"
-                    strokeDashoffset={339.3 - (339.3 * weeklyWorkoutProgressPercent) / 100}
-                    strokeLinecap="round"
-                    transform="rotate(-90 64 64)"
-                    style={{
-                      transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
-                    }}
-                  />
-                  {/* Curved Top Text */}
-                  <text className="fill-zinc-500 text-[8px] sm:text-[9px] font-bold tracking-[0.15em] uppercase font-sans">
-                    <textPath href="#top-curve" startOffset="50%" textAnchor="middle">
-                      Weekly Map
-                    </textPath>
-                  </text>
-                  {/* Center Percentage */}
-                  <text x="64" y="73" className="fill-white text-2xl sm:text-3xl font-extrabold font-sans tracking-tighter" textAnchor="middle">
-                    {weeklyWorkoutProgressPercent}%
-                  </text>
-                  {/* Curved Bottom Text */}
-                  <text className="fill-zinc-500 text-[7px] sm:text-[8px] font-bold tracking-wider uppercase font-sans">
-                    <textPath href="#bottom-curve" startOffset="50%" textAnchor="middle">
-                      {completedWorkouts} of 4 Days
-                    </textPath>
-                  </text>
-                </svg>
-                
-                {/* Overlapping Blue Badge */}
-                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 bg-[#2f80ed] text-white rounded-full flex items-center justify-center text-[8px] sm:text-[10px] font-extrabold shadow-lg shadow-blue-500/25 w-6 h-6 sm:w-7 sm:h-7 border-2 border-[#1c1c1e]">
-                  +{completedWorkouts}
-                </div>
+            {/* Tab switcher capsule */}
+            <div className="flex justify-between items-center mb-1 px-1">
+              <span className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase">
+                {activeTab === 0 ? 'Performance Split' : 'Biophysical Wellness'}
+              </span>
+              <div className="flex bg-white/5 border border-white/10 rounded-full p-0.5 relative">
+                <button
+                  onClick={() => setActiveTab(0)}
+                  className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                    activeTab === 0 ? 'bg-white text-black font-extrabold shadow-sm' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Focus
+                </button>
+                <button
+                  onClick={() => setActiveTab(1)}
+                  className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                    activeTab === 1 ? 'bg-white text-black font-extrabold shadow-sm' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Health
+                </button>
               </div>
             </div>
 
-            {/* Right Bento Column: 3 Horizontal Pill Cards */}
-            <div className="col-span-7 flex flex-col gap-2.5 sm:gap-3 justify-between">
-              
-              {/* Card 1: Weekly Incline Walk (Teal Pill) */}
-              <div className="bg-[#064e43] rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden group">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-[#042d26] flex-shrink-0">
-                  <Flame size={15} className="text-white sm:w-[18px] sm:h-[18px]" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-teal-200/60 font-semibold font-sans">
-                    Treadmill Walk
-                  </span>
-                  <span className="text-[11px] sm:text-sm font-bold text-white font-sans leading-tight truncate">
-                    {totalWalkMins} / {treadmillWalkTarget} Mins
-                  </span>
-                </div>
-                <span className="ml-auto text-[9px] sm:text-xs font-bold text-teal-200/80 font-sans whitespace-nowrap">
-                  {walkProgressPercent}%
-                </span>
-              </div>
-
-              {/* Card 2: Today's Target Lift (Grey Pill) */}
-              <div className="bg-[#2a2b2d] rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-[#1e1f21] flex-shrink-0">
-                  <Dumbbell size={15} className="text-white sm:w-[18px] sm:h-[18px]" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-semibold font-sans">
-                    Today's Target
-                  </span>
-                  <span className="text-[11px] sm:text-sm font-bold text-white font-sans leading-tight truncate">
-                    {keyLift ? keyLift.name.split(' (')[0].split(' or ')[0] : 'Active Recovery'}
-                  </span>
-                </div>
-                {keyLift && (
-                  <span className="ml-auto text-[9px] sm:text-[10px] font-medium text-zinc-300 font-sans bg-white/5 border border-white/10 rounded-lg px-1.5 sm:px-2 py-0.5 whitespace-nowrap truncate max-w-[50px] sm:max-w-none">
-                    {prevBestSetString.replace(' (Target)', '')}
-                  </span>
-                )}
-              </div>
-
-              {/* Card 3: Interactive Sleep & Recovery (Purple Pill) */}
-              <div 
-                onClick={() => setIsSleepModalOpen(true)}
-                className="bg-[#5c3b9b] rounded-full p-2 sm:p-2.5 pr-4 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden cursor-pointer hover:opacity-90 active:scale-[0.99] transition-all"
+            {/* Swipeable Tabs Container */}
+            <div className="relative overflow-hidden w-full select-none cursor-grab active:cursor-grabbing">
+              <motion.div
+                className="flex w-[200%]"
+                animate={{ x: activeTab === 0 ? '0%' : '-50%' }}
+                transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+                drag="x"
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.25}
+                onDragEnd={(e, info) => {
+                  const swipeThreshold = 50;
+                  if (info.offset.x < -swipeThreshold) {
+                    setActiveTab(1);
+                  } else if (info.offset.x > swipeThreshold) {
+                    setActiveTab(0);
+                  }
+                }}
               >
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-[#391e6b] flex-shrink-0">
-                  <Moon size={15} className="text-white sm:w-[18px] sm:h-[18px]" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-purple-200/60 font-semibold font-sans">
-                    Sleep Duration
-                  </span>
-                  <span className="text-[11px] sm:text-sm font-bold text-white font-sans leading-tight">
-                    {Math.floor(sleepHours)} h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)} m` : '00 m'}
-                  </span>
-                </div>
-                
-                {/* Visual indicator that it's clickable/editable */}
-                <span className="ml-auto text-[7px] sm:text-[9px] uppercase tracking-wider text-purple-200/40 font-semibold font-sans font-mono border border-white/5 bg-black/10 rounded px-1.5 py-0.5">
-                  Log
-                </span>
-              </div>
+                {/* Tab 1: Performance Focus (5-span Map, 7-span Pills) */}
+                <div className="w-1/2 flex-shrink-0 grid grid-cols-12 gap-3 sm:gap-4 pr-1.5 sm:pr-2">
+                  
+                  {/* Left: Weekly Progress Circle Map */}
+                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-5 flex flex-col items-center justify-center min-h-[180px] sm:min-h-[216px] relative overflow-hidden">
+                    <div className="relative flex items-center justify-center">
+                      <svg className="w-full h-auto max-w-[124px] sm:max-w-[150px] aspect-square" viewBox="0 0 128 128">
+                        <defs>
+                          <path id="top-curve" d="M 20,64 A 44,44 0 0,1 108,64" fill="transparent" />
+                          <path id="bottom-curve" d="M 108,64 A 44,44 0 0,1 20,64" fill="transparent" />
+                        </defs>
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="54"
+                          style={{ stroke: 'var(--circle-track)' }}
+                          className="fill-transparent"
+                          strokeWidth="11"
+                        />
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="54"
+                          className="fill-transparent"
+                          strokeWidth="11"
+                          strokeDasharray="339.3"
+                          strokeDashoffset={339.3 - (339.3 * weeklyWorkoutProgressPercent) / 100}
+                          strokeLinecap="round"
+                          transform="rotate(-90 64 64)"
+                          style={{
+                            stroke: 'var(--foreground)',
+                            transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}
+                        />
+                        <text className="fill-zinc-500 text-[8px] sm:text-[9px] font-bold tracking-[0.15em] uppercase font-sans">
+                          <textPath href="#top-curve" startOffset="50%" textAnchor="middle">
+                            Weekly Map
+                          </textPath>
+                        </text>
+                        <text x="64" y="73" style={{ fill: 'var(--foreground)' }} className="text-2xl sm:text-3xl font-extrabold font-sans tracking-tighter" textAnchor="middle">
+                          {weeklyWorkoutProgressPercent}%
+                        </text>
+                        <text className="fill-zinc-500 text-[7px] sm:text-[8px] font-bold tracking-wider uppercase font-sans">
+                          <textPath href="#bottom-curve" startOffset="50%" textAnchor="middle">
+                            {completedWorkouts} of 4 Days
+                          </textPath>
+                        </text>
+                      </svg>
+                      
+                      <div 
+                        style={{ borderColor: 'var(--card-bg-1)' }}
+                        className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 bg-[#2f80ed] text-white rounded-full flex items-center justify-center text-[8px] sm:text-[10px] font-extrabold shadow-lg shadow-blue-500/25 w-6 h-6 sm:w-7 sm:h-7 border-2"
+                      >
+                        +{completedWorkouts}
+                      </div>
+                    </div>
+                  </div>
 
+                  {/* Right: 3 stacked pills */}
+                  <div className="col-span-7 flex flex-col gap-2.5 sm:gap-3 justify-between">
+                    
+                    {/* Card 1: Treadmill Walk */}
+                    <div className="bg-treadmill-bg border border-white/5 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden group">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-treadmill-icon-bg flex-shrink-0">
+                        <Flame size={15} className="text-treadmill-icon sm:w-[18px] sm:h-[18px]" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-treadmill-muted font-semibold font-sans">
+                          Treadmill Walk
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-treadmill-text font-sans leading-tight truncate">
+                          {totalWalkMins} / {treadmillWalkTarget} Mins
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[9px] sm:text-xs font-bold text-treadmill-text font-sans whitespace-nowrap">
+                        {walkProgressPercent}%
+                      </span>
+                    </div>
+
+                    {/* Card 2: Today's Target Lift */}
+                    <div className="bg-card-3 border border-white/5 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-card-1 flex-shrink-0" style={{ backgroundColor: 'var(--card-3-icon-bg)' }}>
+                        <Dumbbell size={15} className="text-white-adj sm:w-[18px] sm:h-[18px]" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-semibold font-sans">
+                          Today's Target
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-white-adj font-sans leading-tight truncate">
+                          {keyLift ? keyLift.name.split(' (')[0].split(' or ')[0] : 'Active Recovery'}
+                        </span>
+                      </div>
+                      {keyLift && (
+                        <span className="ml-auto text-[9px] sm:text-[10px] font-medium text-zinc-600 dark:text-zinc-300 font-sans bg-white/50 dark:bg-white/5 border border-black/5 dark:border-white/10 rounded-lg px-1.5 sm:px-2 py-0.5 whitespace-nowrap truncate max-w-[50px] sm:max-w-none">
+                          {prevBestSetString.replace(' (Target)', '')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Card 3: Workout Streak (Flame Pill) */}
+                    <div className="bg-orange-500/5 dark:bg-orange-500/10 border border-orange-500/10 dark:border-orange-500/20 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-orange-500/10 dark:bg-orange-500/20 flex-shrink-0">
+                        <Flame size={15} className="text-orange-600 dark:text-orange-400 fill-orange-500/20 sm:w-[18px] sm:h-[18px]" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-semibold font-sans">
+                          Workout Streak
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-white-adj font-sans leading-tight truncate">
+                          {workoutStreak} Week Streak
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[8px] font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/30 rounded px-2 py-0.5 uppercase whitespace-nowrap">
+                        {workoutStreak > 0 ? '🔥 Active' : 'No Streak'}
+                      </span>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Tab 2: Biophysical Wellness (5-span Water, 7-span Pills) */}
+                <div className="w-1/2 flex-shrink-0 grid grid-cols-12 gap-3 sm:gap-4 pl-1.5 sm:pl-2">
+                  
+                  {/* Left: Water Intake Bento Card */}
+                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-5 flex flex-col justify-between min-h-[180px] sm:min-h-[216px] relative overflow-hidden group">
+                    <div 
+                      className="absolute bottom-0 left-0 right-0 bg-[#2f80ed]/10 transition-all duration-700 pointer-events-none" 
+                      style={{ height: `${Math.min(100, (waterIntake / waterTarget) * 100)}%` }}
+                    />
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center relative z-10 gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <Droplet size={12} className="text-blue-400 fill-blue-400/20" />
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-bold font-sans">
+                          Hydration
+                        </span>
+                      </div>
+                      <span className="text-[7px] font-mono text-blue-400 bg-blue-950/20 border border-blue-900/30 rounded px-1.5 py-0.5 uppercase self-start sm:self-auto whitespace-nowrap">
+                        Water Log
+                      </span>
+                    </div>
+                    <div className="my-1.5 sm:my-2 text-center relative z-10">
+                      <p className="text-xl sm:text-3xl font-extrabold text-white-adj font-mono leading-none">
+                        {waterIntake.toFixed(2)}<span className="text-[10px] sm:text-xs font-bold text-zinc-500">L</span>
+                      </p>
+                      <p className="text-[8px] sm:text-[10px] text-zinc-500 mt-0.5 sm:mt-1 font-medium font-mono">
+                        Target: {waterTarget.toFixed(2)} L
+                      </p>
+                    </div>
+                    <div className="flex justify-center items-center gap-1.5 sm:gap-4 relative z-10">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); adjustWater(-0.25); }}
+                        className="w-6 h-6 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white-adj cursor-pointer transition-all active:scale-90"
+                        title="Subtract 250ml"
+                      >
+                        <Minus size={10} className="sm:w-[14px] sm:h-[14px]" />
+                      </button>
+                      <span className="text-[7px] sm:text-[9px] font-bold font-mono text-zinc-400 uppercase tracking-wider whitespace-nowrap">
+                        250 ml
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); adjustWater(0.25); }}
+                        className="w-6 h-6 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white-adj cursor-pointer transition-all active:scale-90"
+                        title="Add 250ml"
+                      >
+                        <Plus size={10} className="sm:w-[14px] sm:h-[14px]" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right: 3 wellness pills */}
+                  <div className="col-span-7 flex flex-col gap-2.5 sm:gap-3 justify-between">
+                    
+                    {/* Card 1: Sleep Duration (Purple Pill) */}
+                    <div 
+                      onClick={() => setIsSleepModalOpen(true)}
+                      className="bg-sleep-bg border border-white/5 rounded-full p-2 sm:p-2.5 pr-4 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden cursor-pointer hover:opacity-90 active:scale-[0.99] transition-all"
+                    >
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-sleep-icon-bg flex-shrink-0">
+                        <Moon size={15} className="text-sleep-icon sm:w-[18px] sm:h-[18px]" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-sleep-muted font-semibold font-sans">
+                          Sleep Duration
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-sleep-text font-sans leading-tight">
+                          {Math.floor(sleepHours)}h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)}m` : '00m'}
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[7px] sm:text-[9px] uppercase tracking-wider text-sleep-muted font-semibold font-sans font-mono border border-white/5 bg-black/10 rounded px-1.5 py-0.5">
+                        Log
+                      </span>
+                    </div>
+
+                    {/* Card 2: CNS Readiness State */}
+                    <div className={`rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] border border-white/5 relative overflow-hidden ${
+                      sleepHours < 7.0 
+                        ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' 
+                        : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20'
+                    }`}>
+                      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${
+                        sleepHours < 7.0 ? 'bg-amber-100 dark:bg-amber-500/20' : 'bg-emerald-100 dark:bg-emerald-500/20'
+                      } flex-shrink-0`}>
+                        {sleepHours < 7.0 ? (
+                          <AlertTriangle size={15} className="text-amber-700 dark:text-amber-400" />
+                        ) : (
+                          <ShieldCheck size={15} className="text-emerald-700 dark:text-emerald-400" />
+                        )}
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-semibold font-sans">
+                          CNS Readiness
+                        </span>
+                        <span className={`text-[11px] sm:text-sm font-bold font-sans leading-tight truncate ${
+                          sleepHours < 7.0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'
+                        }`}>
+                          {sleepHours < 7.0 ? 'Deload Rec.' : 'CNS Optimal'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Card 3: Hydration Stats Pill */}
+                    <div className="bg-blue-50 dark:bg-[#2f80ed]/10 border border-blue-200 dark:border-[#2f80ed]/20 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-blue-100 dark:bg-[#2f80ed]/20 flex-shrink-0">
+                        <Droplet size={15} className="text-blue-600 dark:text-blue-400 fill-blue-500/20" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-blue-800 dark:text-blue-300 font-semibold font-sans">
+                          Hydration Stats
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-white-adj font-sans leading-tight truncate">
+                          {waterIntake >= waterTarget ? 'Goal Achieved' : 'Drink More Water'}
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[9px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 font-sans whitespace-nowrap">
+                        {Math.round((waterIntake / waterTarget) * 100)}%
+                      </span>
+                    </div>
+
+                  </div>
+                </div>
+
+              </motion.div>
             </div>
-          </motion.div>
 
+            {/* Apple style page dots indicators */}
+            <div className="flex justify-center gap-1.5 mt-2">
+              <button 
+                onClick={() => setActiveTab(0)} 
+                className={`w-1.5 h-1.5 rounded-full transition-all duration-300 cursor-pointer ${activeTab === 0 ? 'bg-white w-3' : 'bg-white/20'}`}
+                title="Overview"
+              />
+              <button 
+                onClick={() => setActiveTab(1)} 
+                className={`w-1.5 h-1.5 rounded-full transition-all duration-300 cursor-pointer ${activeTab === 1 ? 'bg-white w-3' : 'bg-white/20'}`}
+                title="Wellness"
+              />
+            </div>
+
+          </motion.div>
+          
           {/* Standalone Today's Plan Card (Formal Start Workout Card) */}
           <motion.div variants={itemVariants} className="w-full">
             <div className="bg-[#121214] border border-white/5 rounded-[28px] p-5 sm:p-6 flex flex-col gap-4 relative overflow-hidden">
@@ -585,6 +852,32 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                 {/* SVG Wireframe Heatmap */}
                 <div className="w-1/2 flex justify-center bg-black/25 rounded-2xl p-2 border border-white/5 relative">
                   <svg viewBox="0 0 100 100" className="w-full h-auto max-h-[170px]" style={{ filter: 'drop-shadow(0 0 2px rgba(255,255,255,0.02))' }}>
+                    <style>{`
+                      @keyframes cyanPulse {
+                        0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 1px rgba(0, 240, 255, 0.4)); stroke-width: 1.2px; }
+                        50% { opacity: 1.0; filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.8)); stroke-width: 1.6px; }
+                      }
+                      @keyframes amberPulse {
+                        0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 1px rgba(255, 170, 0, 0.3)); stroke-width: 1.2px; }
+                        50% { opacity: 1.0; filter: drop-shadow(0 0 6px rgba(255, 170, 0, 0.9)); stroke-width: 1.8px; }
+                      }
+                      @keyframes crimsonPulse {
+                        0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 1px rgba(255, 51, 85, 0.2)); stroke-width: 1.2px; }
+                        50% { opacity: 1.0; filter: drop-shadow(0 0 10px rgba(255, 51, 85, 1)); stroke-width: 2.0px; }
+                      }
+                      .muscle-cyan {
+                        animation: cyanPulse 5s ease-in-out infinite;
+                        transition: all 0.3s ease;
+                      }
+                      .muscle-amber {
+                        animation: amberPulse 2.5s ease-in-out infinite;
+                        transition: all 0.3s ease;
+                      }
+                      .muscle-crimson {
+                        animation: crimsonPulse 1.5s ease-in-out infinite;
+                        transition: all 0.3s ease;
+                      }
+                    `}</style>
                     <defs>
                       <filter id="cyan-glow"><feGaussianBlur stdDeviation="1.5" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
                       <filter id="amber-glow"><feGaussianBlur stdDeviation="1.5" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -599,22 +892,22 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       <circle cx="30" cy="18" r="4" fill="none" stroke="#3f3f46" strokeWidth="1" />
                       
                       {/* Shoulders */}
-                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} />
-                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} />
+                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
+                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
                       
                       {/* Chest */}
-                      <path d="M 23 26 L 37 26 L 37 34 L 30 37 L 23 34 Z" fill="none" stroke={getMuscleColor('Chest')} strokeWidth="1.2" filter={`url(#${getGlowId('Chest')})`} />
+                      <path d="M 23 26 L 37 26 L 37 34 L 30 37 L 23 34 Z" fill="none" stroke={getMuscleColor('Chest')} strokeWidth="1.2" filter={`url(#${getGlowId('Chest')})`} className={getMuscleClass('Chest')} />
                       
                       {/* Abs (Core) */}
-                      <rect x="25" y="36" width="10" height="15" fill="none" stroke={getMuscleColor('Core')} strokeWidth="1.2" filter={`url(#${getGlowId('Core')})`} />
+                      <rect x="25" y="36" width="10" height="15" fill="none" stroke={getMuscleColor('Core')} strokeWidth="1.2" filter={`url(#${getGlowId('Core')})`} className={getMuscleClass('Core')} />
                       
                       {/* Arms */}
-                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} />
-                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} />
+                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
+                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
                       
                       {/* Quads */}
-                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} />
-                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} />
+                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={getMuscleClass('Quads')} />
+                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={getMuscleClass('Quads')} />
                     </g>
 
                     {/* Right Side: BACK VIEW */}
@@ -625,19 +918,19 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       <circle cx="30" cy="18" r="4" fill="none" stroke="#3f3f46" strokeWidth="1" />
                       
                       {/* Shoulders */}
-                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} />
-                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} />
+                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
+                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
                       
                       {/* Upper/Lower Back */}
-                      <path d="M 22 26 L 38 26 L 35 44 L 30 51 L 25 44 Z" fill="none" stroke={getMuscleColor('Back')} strokeWidth="1.2" filter={`url(#${getGlowId('Back')})`} />
+                      <path d="M 22 26 L 38 26 L 35 44 L 30 51 L 25 44 Z" fill="none" stroke={getMuscleColor('Back')} strokeWidth="1.2" filter={`url(#${getGlowId('Back')})`} className={getMuscleClass('Back')} />
                       
                       {/* Arms */}
-                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} />
-                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} />
+                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
+                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
                       
                       {/* Hamstrings / Glutes */}
-                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} />
-                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} />
+                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={getMuscleClass('Hamstrings')} />
+                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={getMuscleClass('Hamstrings')} />
                     </g>
                   </svg>
                 </div>

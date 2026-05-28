@@ -21,22 +21,26 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
   const totalDuration = 30 * 60; // 30 minutes
   const [secondsLeft, setSecondsLeft] = useState(totalDuration);
   const [isPaused, setIsPaused] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Timer logic
   useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
     if (!isPaused && secondsLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setSecondsLeft(prev => prev - 1);
+      intervalId = setInterval(() => {
+        setSecondsLeft(prev => {
+          if (prev <= 1) {
+            if (intervalId) clearInterval(intervalId);
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
-    } else if (secondsLeft === 0) {
-      if (timerRef.current) clearInterval(timerRef.current);
     }
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [isPaused, secondsLeft]);
+  }, [isPaused]);
 
   // Format time
   const formatTime = (totalSeconds: number) => {

@@ -36,7 +36,6 @@ export default function RecoveryView({ session, onBack, onLogRecovery, weight, u
   const [gpsSimulator, setGpsSimulator] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('Off');
 
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -70,58 +69,54 @@ export default function RecoveryView({ session, onBack, onLogRecovery, weight, u
 
   // Timer tick effect
   useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
     if (isTracking && !isPaused) {
-      timerIntervalRef.current = setInterval(() => {
-        setElapsedSeconds(prev => {
-          const nextSecs = prev + 1;
-          
-          // ACSM recovery calories formula
-          // CaloriesPerMinute = METs * 3.5 * weight / 200
-          const calsPerMin = (activeMet * 3.5 * weight) / 200;
-          setCaloriesBurned((calsPerMin * nextSecs) / 60);
-
-          // Simulated GPS updates (runs on mock coordinates)
-          if (gpsSimulator && nextSecs % 3 === 0) {
-            // Generate circular path starting from mock base location
-            const baseLat = 37.7749;
-            const baseLng = -122.4194;
-            const angle = (nextSecs / 120) * Math.PI * 2;
-            const radius = 0.0015; // path radius scale
-            
-            const newLat = baseLat + Math.sin(angle) * radius + (Math.random() - 0.5) * 0.0001;
-            const newLng = baseLng + Math.cos(angle) * radius + (Math.random() - 0.5) * 0.0001;
-
-            setGpsPath(prevPath => {
-              const newCoord = { lat: newLat, lng: newLng, time: Date.now() };
-              const updatedPath = [...prevPath, newCoord];
-              
-              if (prevPath.length > 0) {
-                const prevCoord = prevPath[prevPath.length - 1];
-                const segmentDist = calculateHaversine(prevCoord.lat, prevCoord.lng, newLat, newLng);
-                setDistanceKm(d => d + segmentDist);
-                
-                // Speed in km/h: distance in km / time in hours
-                const timeDiffHours = 3 / 3600; // 3 seconds segment
-                setCurrentSpeedKmh(segmentDist / timeDiffHours);
-              } else {
-                setCurrentSpeedKmh(activity === 'Jogging' ? 9.5 : 5.2);
-              }
-              
-              return updatedPath;
-            });
-          }
-
-          return nextSecs;
-        });
+      intervalId = setInterval(() => {
+        setElapsedSeconds(prev => prev + 1);
       }, 1000);
-    } else {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     }
-
     return () => {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (intervalId) clearInterval(intervalId);
     };
-  }, [isTracking, isPaused, activeMet, weight, gpsSimulator, activity]);
+  }, [isTracking, isPaused]);
+
+  // Handle side-effects of timer ticking (ACSM math, simulated GPS coordinates)
+  useEffect(() => {
+    if (!isTracking || isPaused || elapsedSeconds === 0) return;
+
+    // ACSM recovery calories formula
+    const calsPerMin = (activeMet * 3.5 * weight) / 200;
+    setCaloriesBurned((calsPerMin * elapsedSeconds) / 60);
+
+    // Simulated GPS updates (runs on mock coordinates every 3 seconds)
+    if (gpsSimulator && elapsedSeconds % 3 === 0) {
+      const baseLat = 37.7749;
+      const baseLng = -122.4194;
+      const angle = (elapsedSeconds / 120) * Math.PI * 2;
+      const radius = 0.0015;
+      
+      const newLat = baseLat + Math.sin(angle) * radius + (Math.random() - 0.5) * 0.0001;
+      const newLng = baseLng + Math.cos(angle) * radius + (Math.random() - 0.5) * 0.0001;
+
+      setGpsPath(prevPath => {
+        const newCoord = { lat: newLat, lng: newLng, time: Date.now() };
+        const updatedPath = [...prevPath, newCoord];
+        
+        if (prevPath.length > 0) {
+          const prevCoord = prevPath[prevPath.length - 1];
+          const segmentDist = calculateHaversine(prevCoord.lat, prevCoord.lng, newLat, newLng);
+          setDistanceKm(d => d + segmentDist);
+          
+          const timeDiffHours = 3 / 3600;
+          setCurrentSpeedKmh(segmentDist / timeDiffHours);
+        } else {
+          setCurrentSpeedKmh(activity === 'Jogging' ? 9.5 : 5.2);
+        }
+        
+        return updatedPath;
+      });
+    }
+  }, [elapsedSeconds, isTracking, isPaused, activeMet, weight, gpsSimulator, activity]);
 
   // Canvas map drawing effect
   useEffect(() => {

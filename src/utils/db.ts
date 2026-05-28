@@ -95,59 +95,98 @@ export const db = {
       return session;
     }
 
-    // Live Supabase Authenticate
-    const supabase = getSupabase();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password
-    });
+    try {
+      // Live Supabase Authenticate
+      const supabase = getSupabase();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password
+      });
 
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (!data.session || !data.user) {
-      throw new Error('Failed to retrieve active session.');
-    }
-
-    // Try fetching user profile from database
-    const profileRes = (await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', data.user.id)
-      .single()) as any;
-
-    let name = data.user.user_metadata?.name || email.split('@')[0];
-    if (profileRes.data) {
-      name = profileRes.data.name;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(
-          'forma_user_profile',
-          JSON.stringify({
-            name: profileRes.data.name,
-            email: profileRes.data.email,
-            weight: Number(profileRes.data.weight),
-            height: Number(profileRes.data.height),
-            bodyFat: Number(profileRes.data.body_fat),
-            units: profileRes.data.units || 'metric'
-          })
-        );
-        localStorage.setItem('forma_setting_zeroui', String(profileRes.data.zero_ui_enabled));
-        localStorage.setItem('forma_setting_autooverload', String(profileRes.data.auto_overload_enabled));
+      if (error) {
+        throw new Error(error.message);
       }
+
+      if (!data.session || !data.user) {
+        throw new Error('Failed to retrieve active session.');
+      }
+
+      // Try fetching user profile from database
+      const profileRes = (await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single()) as any;
+
+      let name = data.user.user_metadata?.name || email.split('@')[0];
+      if (profileRes.data) {
+        name = profileRes.data.name;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            'forma_user_profile',
+            JSON.stringify({
+              name: profileRes.data.name,
+              email: profileRes.data.email,
+              weight: Number(profileRes.data.weight),
+              height: Number(profileRes.data.height),
+              bodyFat: Number(profileRes.data.body_fat),
+              units: profileRes.data.units || 'metric'
+            })
+          );
+          localStorage.setItem('forma_setting_zeroui', String(profileRes.data.zero_ui_enabled));
+          localStorage.setItem('forma_setting_autooverload', String(profileRes.data.auto_overload_enabled));
+        }
+      }
+
+      const session: UserSession = {
+        name,
+        email: data.user.email || email,
+        token: data.session.access_token
+      };
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('forma_user_session', JSON.stringify(session));
+      }
+
+      return session;
+    } catch (e: any) {
+      if (e.message?.includes('Failed to fetch') || e instanceof TypeError) {
+        console.warn('FORMA: Supabase connection failed during sign in. Falling back to local storage simulator mode.');
+        // Run simulator
+        await delay(600);
+        if (!email.includes('@')) {
+          throw new Error('Invalid email format. Please specify a correct email.');
+        }
+        if (password.length < 4) {
+          throw new Error('Password must be at least 4 characters long.');
+        }
+
+        const session: UserSession = {
+          name: email.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          email: email,
+          token: 'forma_jwt_mock_token_' + Math.random().toString(36).substr(2, 9)
+        };
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('forma_user_session', JSON.stringify(session));
+          
+          const existingProfile = localStorage.getItem('forma_user_profile');
+          if (!existingProfile) {
+            const defaultProfile: UserProfile = {
+              name: session.name,
+              email: session.email,
+              weight: 78.4,
+              height: 182,
+              bodyFat: 12.8,
+              units: 'metric'
+            };
+            localStorage.setItem('forma_user_profile', JSON.stringify(defaultProfile));
+          }
+        }
+        return session;
+      }
+      throw e;
     }
-
-    const session: UserSession = {
-      name,
-      email: data.user.email || email,
-      token: data.session.access_token
-    };
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('forma_user_session', JSON.stringify(session));
-    }
-
-    return session;
   },
 
   /**
@@ -203,57 +242,99 @@ export const db = {
       return session;
     }
 
-    // Live Supabase Register
-    const supabase = getSupabase();
-    const redirectToUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : undefined;
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: redirectToUrl,
-        data: {
+    try {
+      // Live Supabase Register
+      const supabase = getSupabase();
+      const redirectToUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : undefined;
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: redirectToUrl,
+          data: {
+            name: name.trim(),
+            weight,
+            height,
+            bodyFat
+          }
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!data.user) {
+        throw new Error('Registration failed.');
+      }
+
+      if (data.session) {
+        const session: UserSession = {
           name: name.trim(),
+          email: email.trim(),
+          token: data.session.access_token
+        };
+
+        const profile: UserProfile = {
+          name: name.trim(),
+          email: email.trim(),
           weight,
           height,
-          bodyFat
+          bodyFat,
+          units: 'metric'
+        };
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('forma_user_session', JSON.stringify(session));
+          localStorage.setItem('forma_user_profile', JSON.stringify(profile));
+          localStorage.setItem('forma_setting_zeroui', 'false');
+          localStorage.setItem('forma_setting_autooverload', 'true');
         }
+
+        return session;
+      } else {
+        throw new Error('Sign up successful! Please check your email inbox to confirm registration, then sign in.');
       }
-    });
+    } catch (e: any) {
+      if (e.message?.includes('Failed to fetch') || e instanceof TypeError) {
+        console.warn('FORMA: Supabase connection failed during sign up. Falling back to local storage simulator mode.');
+        // Run simulator
+        await delay(700);
+        if (!email.includes('@')) {
+          throw new Error('Invalid email format.');
+        }
+        if (password.length < 4) {
+          throw new Error('Password must be at least 4 characters.');
+        }
+        if (!name.trim()) {
+          throw new Error('Name cannot be blank.');
+        }
 
-    if (error) {
-      throw new Error(error.message);
-    }
+        const session: UserSession = {
+          name: name.trim(),
+          email: email.trim(),
+          token: 'forma_jwt_mock_token_' + Math.random().toString(36).substr(2, 9)
+        };
 
-    if (!data.user) {
-      throw new Error('Registration failed.');
-    }
+        const profile: UserProfile = {
+          name: name.trim(),
+          email: email.trim(),
+          weight,
+          height,
+          bodyFat,
+          units: 'metric'
+        };
 
-    if (data.session) {
-      const session: UserSession = {
-        name: name.trim(),
-        email: email.trim(),
-        token: data.session.access_token
-      };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('forma_user_session', JSON.stringify(session));
+          localStorage.setItem('forma_user_profile', JSON.stringify(profile));
+          localStorage.setItem('forma_setting_zeroui', 'false');
+          localStorage.setItem('forma_setting_autooverload', 'true');
+        }
 
-      const profile: UserProfile = {
-        name: name.trim(),
-        email: email.trim(),
-        weight,
-        height,
-        bodyFat,
-        units: 'metric'
-      };
-
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('forma_user_session', JSON.stringify(session));
-        localStorage.setItem('forma_user_profile', JSON.stringify(profile));
-        localStorage.setItem('forma_setting_zeroui', 'false');
-        localStorage.setItem('forma_setting_autooverload', 'true');
+        return session;
       }
-
-      return session;
-    } else {
-      throw new Error('Sign up successful! Please check your email inbox to confirm registration, then sign in.');
+      throw e;
     }
   },
 
@@ -262,8 +343,12 @@ export const db = {
    */
   async signOut(): Promise<void> {
     if (isSupabaseConfigured()) {
-      const supabase = getSupabase();
-      await supabase.auth.signOut();
+      try {
+        const supabase = getSupabase();
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn("FORMA: Supabase signOut failed (network issue):", e);
+      }
     }
     
     if (typeof window !== 'undefined') {
@@ -289,32 +374,48 @@ export const db = {
       }
     }
 
-    const supabase = getSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session || !session.user) {
-      if (typeof window !== 'undefined') {
-        const cached = localStorage.getItem('forma_user_session');
-        if (cached) {
-          try {
-            return JSON.parse(cached);
-          } catch (e) {}
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session || !session.user) {
+        if (typeof window !== 'undefined') {
+          const cached = localStorage.getItem('forma_user_session');
+          if (cached) {
+            try {
+              return JSON.parse(cached);
+            } catch (e) {}
+          }
         }
+        return null;
       }
-      return null;
+
+      const userSession: UserSession = {
+        name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+        email: session.user.email || '',
+        token: session.access_token
+      };
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('forma_user_session', JSON.stringify(userSession));
+      }
+
+      return userSession;
+    } catch (e: any) {
+      if (e.message?.includes('Failed to fetch') || e instanceof TypeError) {
+        console.warn('FORMA: Supabase connection failed in getLiveSession. Falling back to local storage session.');
+        if (typeof window !== 'undefined') {
+          const cached = localStorage.getItem('forma_user_session');
+          if (cached) {
+            try {
+              return JSON.parse(cached);
+            } catch (err) {}
+          }
+        }
+        return null;
+      }
+      throw e;
     }
-
-    const userSession: UserSession = {
-      name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
-      email: session.user.email || '',
-      token: session.access_token
-    };
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('forma_user_session', JSON.stringify(userSession));
-    }
-
-    return userSession;
   },
 
   /**
@@ -755,7 +856,10 @@ export const db = {
         if (item.date === date && item.sessionId === sessionId) {
           return {
             ...item,
-            cardioDetails: cardioDetails
+            cardioDetails: {
+              ...(item.cardioDetails || {}),
+              ...cardioDetails
+            }
           };
         }
         return item;
@@ -772,8 +876,22 @@ export const db = {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
+        // Fetch current to merge
+        const { data: existing } = (await supabase
+          .from('workout_history')
+          .select('cardio_details')
+          .eq('user_id', user.id)
+          .eq('date', date)
+          .eq('session_id', sessionId)
+          .single()) as any;
+
+        const mergedCardioDetails = {
+          ...(existing?.cardio_details || {}),
+          ...cardioDetails
+        };
+
         await (supabase.from('workout_history') as any)
-          .update({ cardio_details: cardioDetails })
+          .update({ cardio_details: mergedCardioDetails })
           .eq('user_id', user.id)
           .eq('date', date)
           .eq('session_id', sessionId);
@@ -783,6 +901,72 @@ export const db = {
     }
 
     return history;
+  },
+
+  /**
+   * Get body weight history logs
+   */
+  async getWeightHistory(): Promise<Array<{ date: string; weight: number }>> {
+    if (typeof window === 'undefined') return [];
+    const stored = localStorage.getItem('forma_weight_history');
+    if (!stored) {
+      // Seed default with current profile weight
+      const profile = await this.getUserProfile();
+      const initialHistory = [{ date: new Date().toISOString(), weight: profile.weight }];
+      localStorage.setItem('forma_weight_history', JSON.stringify(initialHistory));
+      return initialHistory;
+    }
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      return [];
+    }
+  },
+
+  /**
+   * Log a new weight entry
+   */
+  async logWeight(weight: number): Promise<Array<{ date: string; weight: number }>> {
+    const history = await this.getWeightHistory();
+    const todayStr = new Date().toDateString();
+    
+    // Replace today's log if it exists, otherwise append
+    const filtered = history.filter(item => new Date(item.date).toDateString() !== todayStr);
+    const updated = [
+      ...filtered,
+      { date: new Date().toISOString(), weight: parseFloat(weight.toFixed(1)) }
+    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('forma_weight_history', JSON.stringify(updated));
+    }
+    
+    // Sync current profile weight
+    const profile = await this.getUserProfile();
+    await this.saveUserProfile({ ...profile, weight });
+    
+    return updated;
+  },
+
+  /**
+   * Delete a weight log entry
+   */
+  async deleteWeightLog(dateString: string): Promise<Array<{ date: string; weight: number }>> {
+    const history = await this.getWeightHistory();
+    const updated = history.filter(item => item.date !== dateString);
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('forma_weight_history', JSON.stringify(updated));
+    }
+    
+    // If we have remaining logs, set user profile weight to the most recent log
+    if (updated.length > 0) {
+      const mostRecent = [...updated].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+      const profile = await this.getUserProfile();
+      await this.saveUserProfile({ ...profile, weight: mostRecent.weight });
+    }
+    
+    return updated;
   },
 
   /**
@@ -821,8 +1005,76 @@ export const db = {
     if (typeof window !== 'undefined') {
       localStorage.setItem('forma_sessions', JSON.stringify(GENESIS_SPLIT));
       localStorage.setItem('forma_history', JSON.stringify([]));
+      localStorage.removeItem('forma_weight_history');
       localStorage.setItem('forma_setting_zeroui', 'false');
       localStorage.setItem('forma_setting_autooverload', 'true');
+    }
+  },
+
+  /**
+   * Synchronize any local logs created while offline to Supabase
+   */
+  async syncOfflineQueue(): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const supabase = getSupabase();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Sync User Profile if dirty
+      const profileStr = localStorage.getItem('forma_user_profile');
+      if (profileStr) {
+        try {
+          const profile = JSON.parse(profileStr);
+          await (supabase.from('user_profiles') as any)
+            .upsert({
+              user_id: user.id,
+              name: profile.name,
+              weight: profile.weight,
+              height: profile.height,
+              body_fat: profile.bodyFat,
+              units: profile.units || 'metric',
+              updated_at: new Date().toISOString()
+            });
+        } catch (e) {}
+      }
+
+      // 2. Sync un-synced history logs (logs without id)
+      const historyStr = localStorage.getItem('forma_history');
+      if (historyStr) {
+        try {
+          const localHistory: any[] = JSON.parse(historyStr);
+          const unsyncedLogs = localHistory.filter(item => !item.id);
+          
+          for (const completedLog of unsyncedLogs) {
+            const { data, error } = (await (supabase.from('workout_history') as any)
+              .insert({
+                user_id: user.id,
+                session_id: completedLog.sessionId,
+                session_title: completedLog.sessionTitle,
+                session_focus: completedLog.sessionFocus,
+                date: completedLog.date,
+                actual_tonnage: completedLog.actualTonnage || 0,
+                logs: completedLog.logs || {},
+                cns_score: completedLog.cnsScore || null,
+                recovery_details: completedLog.recoveryDetails || null,
+                rest_details: completedLog.restDetails || null,
+                cardio_details: completedLog.cardioDetails || null
+              })
+              .select()) as any;
+
+            if (!error && data && data.length > 0) {
+              completedLog.id = data[0].id;
+            }
+          }
+
+          localStorage.setItem('forma_history', JSON.stringify(localHistory));
+        } catch (e) {
+          console.warn("FORMA Offline Reconcile History Error:", e);
+        }
+      }
+    } catch (e) {
+      console.warn("syncOfflineQueue failed", e);
     }
   }
 };
