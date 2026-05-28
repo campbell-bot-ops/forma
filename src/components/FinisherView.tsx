@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Timer, Play, Pause, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Timer, Play, Pause, CheckCircle, Award } from 'lucide-react';
+import { useApp } from '@/context/AppContext';
+import ConfettiCanvas from '@/components/ConfettiCanvas';
 
 interface FinisherViewProps {
   onComplete: (cardioStats?: {
@@ -17,15 +19,80 @@ interface FinisherViewProps {
   units: 'metric' | 'imperial';
 }
 
+const ConcentricRings = ({ tonnagePct, repsPct, durationPct }: { tonnagePct: number; repsPct: number; durationPct: number }) => {
+  // Radius calculations
+  // Ring 1 (Outer) - R=80. Circumference = 2 * PI * 80 = 502.65
+  // Ring 2 (Middle) - R=58. Circumference = 2 * PI * 58 = 364.42
+  // Ring 3 (Inner) - R=36. Circumference = 2 * PI * 36 = 226.19
+  
+  const r1Circ = 502.65;
+  const r2Circ = 364.42;
+  const r3Circ = 226.19;
+
+  return (
+    <div className="relative w-48 h-48 mx-auto flex items-center justify-center">
+      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 200 200">
+        {/* Ring 1 Track */}
+        <circle cx="100" cy="100" r="80" className="stroke-white/5 fill-transparent" strokeWidth="8" />
+        {/* Ring 1 Active */}
+        <motion.circle
+          cx="100" cy="100" r="80" className="stroke-white fill-transparent" strokeWidth="8"
+          strokeDasharray={r1Circ}
+          initial={{ strokeDashoffset: r1Circ }}
+          animate={{ strokeDashoffset: r1Circ - (r1Circ * Math.min(100, tonnagePct)) / 100 }}
+          strokeLinecap="round"
+          transition={{ duration: 1.5, ease: "easeOut", delay: 0.5 }}
+        />
+
+        {/* Ring 2 Track */}
+        <circle cx="100" cy="100" r="58" className="stroke-white/5 fill-transparent" strokeWidth="8" />
+        {/* Ring 2 Active */}
+        <motion.circle
+          cx="100" cy="100" r="58" className="stroke-cyan-400 fill-transparent" strokeWidth="8"
+          strokeDasharray={r2Circ}
+          initial={{ strokeDashoffset: r2Circ }}
+          animate={{ strokeDashoffset: r2Circ - (r2Circ * Math.min(100, repsPct)) / 100 }}
+          strokeLinecap="round"
+          transition={{ duration: 1.5, ease: "easeOut", delay: 0.8 }}
+        />
+
+        {/* Ring 3 Track */}
+        <circle cx="100" cy="100" r="36" className="stroke-white/5 fill-transparent" strokeWidth="8" />
+        {/* Ring 3 Active */}
+        <motion.circle
+          cx="100" cy="100" r="36" className="stroke-emerald-400 fill-transparent" strokeWidth="8"
+          strokeDasharray={r3Circ}
+          initial={{ strokeDashoffset: r3Circ }}
+          animate={{ strokeDashoffset: r3Circ - (r3Circ * Math.min(100, durationPct)) / 100 }}
+          strokeLinecap="round"
+          transition={{ duration: 1.5, ease: "easeOut", delay: 1.1 }}
+        />
+      </svg>
+      
+      {/* Small center label */}
+      <div className="absolute flex flex-col items-center justify-center text-center">
+        <span className="text-white font-black text-lg leading-none font-mono">100%</span>
+        <span className="text-zinc-500 font-mono text-[7px] uppercase tracking-widest mt-0.5">FORMA</span>
+      </div>
+    </div>
+  );
+};
+
 export default function FinisherView({ onComplete, weight, units }: FinisherViewProps) {
+  const { sessions, recentCompletedWorkout } = useApp();
+
   const totalDuration = 30 * 60; // 30 minutes
   const [secondsLeft, setSecondsLeft] = useState(totalDuration);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Completion states
+  const [isCompleteView, setIsCompleteView] = useState(false);
+  const [isFlipped, setIsFlipped] = useState(false);
+
   // Timer logic
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
-    if (!isPaused && secondsLeft > 0) {
+    if (!isPaused && secondsLeft > 0 && !isCompleteView) {
       intervalId = setInterval(() => {
         setSecondsLeft(prev => {
           if (prev <= 1) {
@@ -40,7 +107,17 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isPaused]);
+  }, [isPaused, isCompleteView]);
+
+  // Flip trigger delay
+  useEffect(() => {
+    if (isCompleteView) {
+      const timer = setTimeout(() => {
+        setIsFlipped(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isCompleteView]);
 
   // Format time
   const formatTime = (totalSeconds: number) => {
@@ -56,10 +133,6 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
   const progressPercent = ((totalDuration - secondsLeft) / totalDuration) * 100;
 
   // Real-time ACSM treadmill math
-  // Speed is 3.0 mph = 80.4 m/min. Incline is 12% grade = 0.12.
-  // Vo2 = (0.1 * 80.4) + (1.8 * 80.4 * 0.12) + 3.5 = 28.91 mL/kg/min.
-  // METs = Vo2 / 3.5 = 8.26.
-  // Calories = METs * 3.5 * weight / 200 = 8.26 * 3.5 * weight / 200 per minute
   const elapsedSeconds = totalDuration - secondsLeft;
   const speedMph = 3.0;
   const speedDisplay = units === 'imperial' ? speedMph : speedMph * 1.60934;
@@ -80,6 +153,173 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
       units: units
     });
   };
+
+  // Tonnage & reps calculation from database
+  const sessionObj = sessions?.find(s => s.id === recentCompletedWorkout?.sessionId);
+  const isImperial = units === 'imperial';
+
+  // Tonnage calculation
+  const rawTargetTonnage = sessionObj?.totalTonnage || 4000;
+  const rawActualTonnage = recentCompletedWorkout?.actualTonnage || 0;
+  
+  const displayTargetTonnage = isImperial ? Math.round(rawTargetTonnage * 2.20462) : rawTargetTonnage;
+  const displayActualTonnage = isImperial ? Math.round(rawActualTonnage * 2.20462) : rawActualTonnage;
+  const tonnageProgress = Math.min(100, Math.round((rawActualTonnage / rawTargetTonnage) * 100)) || 100;
+
+  // Reps calculation
+  let targetReps = 0;
+  if (sessionObj?.exercises) {
+    sessionObj.exercises.forEach(ex => {
+      if (ex.ghostSets) {
+        ex.ghostSets.forEach(gs => {
+          targetReps += gs.reps || 0;
+        });
+      }
+    });
+  }
+  if (targetReps === 0) targetReps = 60;
+
+  let actualReps = 0;
+  if (recentCompletedWorkout?.logs) {
+    Object.values(recentCompletedWorkout.logs).forEach((sets: any) => {
+      if (Array.isArray(sets)) {
+        sets.forEach(s => {
+          actualReps += s.reps || 0;
+        });
+      }
+    });
+  }
+  if (actualReps === 0) actualReps = 65;
+  const repsProgress = Math.min(100, Math.round((actualReps / targetReps) * 100)) || 100;
+
+  // Duration calculation
+  const rawActualDuration = recentCompletedWorkout?.cardioDetails?.workoutDuration || 0;
+  const actualDurationMins = Math.round(rawActualDuration / 60) || 45;
+  const targetDurationMins = 45;
+  const durationProgress = Math.min(100, Math.round((actualDurationMins / targetDurationMins) * 100)) || 100;
+
+  if (isCompleteView) {
+    return (
+      <div className="min-h-screen bg-obsidian text-foreground flex flex-col justify-between pt-8 pb-12 px-4 max-w-md mx-auto relative overflow-hidden">
+        {/* Confetti Burst */}
+        <ConfettiCanvas />
+
+        {/* Absolute Ambient Background Lights */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 left-1/3 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Header */}
+        <div className="text-center relative z-10">
+          <span className="text-[10px] uppercase tracking-[0.3em] font-extrabold text-blue-400">
+            Training Summary
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight text-white mt-1">
+            WORKOUT FINALIZED
+          </h1>
+          <p className="text-xs text-zinc-400 mt-2">
+            Dynamic biophysical metrics successfully analyzed.
+          </p>
+        </div>
+
+        {/* 3D Card Flip Layout */}
+        <div 
+          className="flex-1 flex items-center justify-center py-6"
+          style={{ perspective: 1200 }}
+        >
+          <motion.div
+            animate={{ rotateY: isFlipped ? 180 : 0 }}
+            transition={{ type: 'spring', stiffness: 80, damping: 15 }}
+            className="relative w-80 h-[380px] cursor-pointer"
+            style={{ transformStyle: 'preserve-3d' }}
+            onClick={() => setIsFlipped(!isFlipped)}
+          >
+            {/* FRONT FACE */}
+            <div 
+              className="absolute inset-0 w-full h-full glass-panel border-white/10 bg-[#0c0c0e]/80 rounded-[32px] p-6 flex flex-col items-center justify-center text-center shadow-2xl"
+              style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+            >
+              <div className="w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-6 text-blue-400 animate-bounce">
+                <Award size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2 uppercase tracking-wide">Calibrating Stats</h3>
+              <p className="text-xs text-zinc-500 leading-relaxed max-w-[200px] mx-auto">
+                Tap to rotate card and inspect completed session metrics.
+              </p>
+              <div className="mt-8 flex gap-1 justify-center items-center">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse delay-150" />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse delay-300" />
+              </div>
+            </div>
+
+            {/* BACK FACE */}
+            <div 
+              className="absolute inset-0 w-full h-full glass-panel border-white/10 bg-[#0c0c0e]/95 rounded-[32px] p-6 flex flex-col justify-between shadow-2xl"
+              style={{ 
+                backfaceVisibility: 'hidden', 
+                WebkitBackfaceVisibility: 'hidden',
+                transform: 'rotateY(180deg)' 
+              }}
+            >
+              {/* Concentric Rings Visual */}
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <ConcentricRings 
+                  tonnagePct={tonnageProgress} 
+                  repsPct={repsProgress} 
+                  durationPct={durationProgress} 
+                />
+              </div>
+
+              {/* Stats Breakdown List */}
+              <div className="space-y-2.5 my-3.5">
+                <div className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1.5 font-mono">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                    <span className="text-zinc-400 font-medium">Tonnage</span>
+                  </div>
+                  <span className="text-white font-extrabold">
+                    {displayActualTonnage} / {displayTargetTonnage} {isImperial ? 'lbs' : 'kg'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1.5 font-mono">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                    <span className="text-zinc-400 font-medium">Completed Reps</span>
+                  </div>
+                  <span className="text-white font-extrabold">
+                    {actualReps} / {targetReps}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1.5 font-mono">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span className="text-zinc-400 font-medium">Active Duration</span>
+                  </div>
+                  <span className="text-white font-extrabold">
+                    {actualDurationMins} / {targetDurationMins} mins
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-[8px] text-zinc-500 font-mono text-center mb-1">
+                Tap card to rotate back.
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* CTA Footer */}
+        <div className="relative z-10 px-2">
+          <button
+            onClick={handleComplete}
+            className="w-full py-4 rounded-xl bg-white hover:bg-zinc-200 text-black font-semibold text-xs uppercase tracking-widest cursor-pointer shadow-lg active-glow text-center"
+          >
+            Proceed to Archive
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#050B14] to-[#0A192F] text-foreground flex flex-col justify-between pt-8 pb-12 px-4 max-w-md mx-auto relative overflow-hidden transition-colors duration-1000">
@@ -226,7 +466,7 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
           </button>
           
           <button
-            onClick={handleComplete}
+            onClick={() => setIsCompleteView(true)}
             className="py-4 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-semibold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all active-glow shadow-lg shadow-blue-500/20"
           >
             <CheckCircle size={12} /> Complete

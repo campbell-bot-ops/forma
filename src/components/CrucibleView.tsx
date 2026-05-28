@@ -19,6 +19,34 @@ interface CrucibleViewProps {
   workoutHistory?: any[];
 }
 
+const calculatePlates = (targetWeight: number, isImperial: boolean) => {
+  const barWeight = isImperial ? 45 : 20;
+  const platesList = isImperial 
+    ? [45, 35, 25, 10, 5, 2.5] 
+    : [25, 20, 15, 10, 5, 2.5, 1.25];
+  
+  if (targetWeight <= barWeight) {
+    return { plates: [], remaining: 0, barWeight };
+  }
+
+  let weightPerSide = (targetWeight - barWeight) / 2;
+  const result: { plate: number; count: number }[] = [];
+
+  for (const plate of platesList) {
+    const count = Math.floor(weightPerSide / plate);
+    if (count > 0) {
+      result.push({ plate, count });
+      weightPerSide -= count * plate;
+    }
+  }
+
+  return {
+    plates: result,
+    remaining: weightPerSide,
+    barWeight
+  };
+};
+
 export default function CrucibleView({
   session,
   onBack,
@@ -74,6 +102,9 @@ export default function CrucibleView({
 
   // Overload Alert
   const [overloadNotice, setOverloadNotice] = useState<string | null>(null);
+
+  // Plate Calculator state
+  const [showPlateCalc, setShowPlateCalc] = useState(false);
 
   // Zero-UI Input Prediction sync
   useEffect(() => {
@@ -274,8 +305,45 @@ export default function CrucibleView({
   return (
     <div className={`min-h-screen relative flex flex-col pt-6 pb-36 px-4 max-w-md mx-auto transition-colors duration-500 overflow-hidden ${timerActive ? 'animate-rest-pulse' : 'bg-obsidian'}`}>
       
+      {/* RPE Ambient Exertion Pulse */}
+      {!timerActive && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+          <motion.div
+            key={rpe}
+            animate={
+              rpe <= 7
+                ? {
+                    scale: [1, 1.05, 1],
+                    opacity: [0.12, 0.2, 0.12],
+                  }
+                : rpe <= 9
+                ? {
+                    scale: [1, 1.08, 1],
+                    opacity: [0.18, 0.32, 0.18],
+                  }
+                : {
+                    scale: [1, 1.15, 1],
+                    opacity: [0.28, 0.55, 0.28],
+                  }
+            }
+            transition={{
+              duration: rpe <= 7 ? 4.5 : rpe <= 9 ? 3.0 : 1.2,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+            className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[380px] h-[380px] rounded-full blur-[100px] transition-all duration-700 ${
+              rpe <= 7
+                ? 'bg-cyan-500/20'
+                : rpe <= 9
+                ? 'bg-amber-500/25'
+                : 'bg-red-600/35'
+            }`}
+          />
+        </div>
+      )}
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 relative z-10">
         <button 
           onClick={() => setShowExitConfirm(true)} 
           className="p-2 -ml-2 text-zinc-500 hover:text-white transition-colors cursor-pointer"
@@ -302,7 +370,7 @@ export default function CrucibleView({
       </div>
 
       {/* Exercise Plan Checklist / Overview Slider */}
-      <div className="flex gap-2 pb-3 mb-4 overflow-x-auto no-scrollbar border-b border-white/5">
+      <div className="flex gap-2 pb-3 mb-4 overflow-x-auto no-scrollbar border-b border-white/5 relative z-10">
         {session.exercises.map((ex, idx) => {
           const isCompleted = (workoutLogs[ex.id]?.length || 0) >= ex.defaultSets;
           const isActive = idx === currentExerciseIdx;
@@ -344,18 +412,17 @@ export default function CrucibleView({
       </AnimatePresence>
 
       {/* Active Workout Card & Sliding transition wrapper */}
-      <div className="flex-1 flex flex-col justify-center">
+      <div className="flex-1 flex flex-col justify-center relative z-10">
         <AnimatePresence custom={direction} mode="wait">
-          {!timerActive ? (
-            <motion.div
-              key={currentExercise.id}
-              custom={direction}
-              variants={slideVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              className="flex flex-col gap-6 w-full"
-            >
+          <motion.div
+            key={currentExercise.id}
+            custom={direction}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            className="flex flex-col gap-6 w-full"
+          >
               {/* Focus Card Details */}
               <div className="glass-panel rounded-3xl p-6 relative overflow-hidden">
                 <AnimatePresence>
@@ -443,9 +510,17 @@ export default function CrucibleView({
               {/* Set Input values */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="glass-panel rounded-2xl p-4 flex flex-col justify-center relative">
-                  <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
-                    Load ({units === 'imperial' ? 'lbs' : 'kg'})
-                  </label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">
+                      Load ({units === 'imperial' ? 'lbs' : 'kg'})
+                    </label>
+                    <button
+                      onClick={() => setShowPlateCalc(true)}
+                      className="text-[8px] font-mono font-bold uppercase tracking-wider text-cyan-400 hover:text-cyan-300 bg-cyan-950/20 border border-cyan-900/30 rounded px-1.5 py-0.5 cursor-pointer flex items-center gap-1 transition-colors"
+                    >
+                      Plates
+                    </button>
+                  </div>
                   <div className="flex items-center justify-between mt-1">
                     <button
                       onClick={() => setWeight(prev => {
@@ -565,138 +640,136 @@ export default function CrucibleView({
                 </div>
               </div>
 
-              {/* RPE Selector */}
-              <div className="glass-panel rounded-2xl p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">
-                    Difficulty / Rate of Perceived Exertion (RPE)
-                  </label>
-                  <span className="text-xs font-bold text-white tracking-wide">
-                    RPE {rpe} &mdash; {effectiveRepsVal} Growth Reps
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-5 gap-2">
-                  {[6, 7, 8, 9, 10].map((val) => (
-                    <button
-                      key={val}
-                      onClick={() => setRpe(val)}
-                      className={`py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                        rpe === val
-                          ? 'bg-white border-white text-black font-extrabold shadow'
-                          : 'border-white/5 hover:border-white/10 text-zinc-500 hover:text-zinc-300'
-                      }`}
-                    >
-                      {val}
-                    </button>
-                  ))}
-                </div>
+              {/* RPE Selector & Confirm Button OR Rest Timer Panel */}
+              {!timerActive ? (
+                <>
+                  {/* RPE Selector */}
+                  <div className="glass-panel rounded-2xl p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">
+                        Difficulty / Rate of Perceived Exertion (RPE)
+                      </label>
+                      <span className="text-xs font-bold text-white tracking-wide">
+                        RPE {rpe} &mdash; {effectiveRepsVal} Growth Reps
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-5 gap-2">
+                      {[6, 7, 8, 9, 10].map((val) => (
+                        <button
+                          key={val}
+                          onClick={() => setRpe(val)}
+                          className={`py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                            rpe === val
+                              ? 'bg-white border-white text-black font-extrabold shadow'
+                              : 'border-white/5 hover:border-white/10 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
 
-                <div className="mt-3 text-[9px] text-zinc-500 flex justify-between font-medium">
-                  <span>RPE 7: 3 reps left (Prompts overload)</span>
-                  <span>RPE 10: Absolute failure</span>
-                </div>
-              </div>
+                    <div className="mt-3 text-[9px] text-zinc-500 flex justify-between font-medium">
+                      <span>RPE 7: 3 reps left (Prompts overload)</span>
+                      <span>RPE 10: Absolute failure</span>
+                    </div>
+                  </div>
 
-              {/* Confirm button */}
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleLogSet}
-                className="w-full bg-white text-black font-semibold text-xs uppercase py-4 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg active-glow"
-              >
-                <Check size={14} strokeWidth={2.5} />
-                Confirm & Log Set {currentSetIdx + 1}
-              </motion.button>
-            </motion.div>
-          ) : (
-            /* Rest Timer Overlay State */
-            <motion.div
-              key="timer"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 flex flex-col items-center justify-center py-6"
-            >
-              <div className="relative flex items-center justify-center w-64 h-64">
-                <svg className="w-full h-full transform -rotate-90">
-                  <defs>
-                    <filter id="rest-glow" x="-20%" y="-20%" width="140%" height="140%">
-                      <feGaussianBlur stdDeviation="3" result="blur" />
-                      <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <circle
-                    cx="128"
-                    cy="128"
-                    r="80"
-                    className="stroke-white/5 fill-transparent"
-                    strokeWidth="4"
-                  />
-                  <circle
-                    cx="128"
-                    cy="128"
-                    r="80"
-                    className="stroke-white fill-transparent"
-                    strokeWidth="4"
-                    strokeDasharray="502.6"
-                    strokeDashoffset={strokeDashoffset}
-                    strokeLinecap="round"
-                    filter="url(#rest-glow)"
-                    style={{ transition: 'stroke-dashoffset 1s linear' }}
-                  />
-                </svg>
-                
-                <div className="absolute text-center flex flex-col items-center justify-center">
-                  <Timer size={24} className="text-white animate-pulse mb-2" />
-                  <p className="text-5xl font-extrabold tracking-tighter text-white font-mono tabular-nums leading-none">
-                    {formatTime(timeLeft)}
-                  </p>
-                  <p className="text-[9px] uppercase tracking-widest text-zinc-500 mt-2 font-mono">
-                    Resting
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-4 mt-6">
-                <button
-                  onClick={() => setTimeLeft(prev => prev + 30)}
-                  className="px-4 py-2 border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/20 text-xs font-semibold rounded-lg text-zinc-300 transition-all cursor-pointer"
+                  {/* Confirm button */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleLogSet}
+                    className="w-full bg-white text-black font-semibold text-xs uppercase py-4 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg active-glow"
+                  >
+                    <Check size={14} strokeWidth={2.5} />
+                    Confirm & Log Set {currentSetIdx + 1}
+                  </motion.button>
+                </>
+              ) : (
+                /* Rest Timer Panel (appears in place of RPE & Confirm button during rest) */
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass-panel border-emerald-950/30 bg-emerald-950/10 rounded-2xl p-5 flex flex-col gap-3 relative overflow-hidden shadow-lg"
                 >
-                  +30s
-                </button>
-                <button
-                  onClick={skipTimer}
-                  className="px-6 py-2 bg-white hover:bg-zinc-200 text-black text-xs font-bold rounded-lg transition-all cursor-pointer"
-                >
-                  Skip Rest
-                </button>
-              </div>
+                  <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent animate-pulse" />
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3.5">
+                      <div className="relative flex items-center justify-center w-14 h-14 flex-shrink-0">
+                        <svg className="w-full h-full transform -rotate-90">
+                          <circle
+                            cx="28"
+                            cy="28"
+                            r="24"
+                            className="stroke-zinc-800 fill-transparent"
+                            strokeWidth="3.5"
+                          />
+                          <circle
+                            cx="28"
+                            cy="28"
+                            r="24"
+                            className="stroke-emerald-400 fill-transparent"
+                            strokeWidth="3.5"
+                            strokeDasharray="150.8"
+                            strokeDashoffset={150.8 - (150.8 * (90 - timeLeft)) / 90}
+                            strokeLinecap="round"
+                            style={{ transition: 'stroke-dashoffset 1s linear' }}
+                          />
+                        </svg>
+                        <span className="absolute text-xs font-bold text-white font-mono tracking-tighter tabular-nums">
+                          {timeLeft}s
+                        </span>
+                      </div>
+                      
+                      <div className="flex flex-col">
+                        <span className="text-[10px] uppercase tracking-[0.15em] text-emerald-400 font-extrabold font-mono flex items-center gap-1.5">
+                          <Timer size={10} className="animate-pulse" /> Rest Active
+                        </span>
+                        <span className="text-[11px] text-zinc-400 mt-0.5 leading-tight">
+                          Prepare for Set {currentSetIdx + 1} of {totalSets}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setTimeLeft(prev => Math.min(300, prev + 30))}
+                        className="px-3 py-2 border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-xl text-zinc-300 transition-all cursor-pointer font-mono"
+                      >
+                        +30s
+                      </button>
+                      <button
+                        onClick={skipTimer}
+                        className="px-4 py-2 bg-white hover:bg-zinc-200 text-black text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                      >
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
             </motion.div>
-          )}
         </AnimatePresence>
       </div>
 
       {/* Progress Footer */}
-      {!timerActive && (
-        <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500">
-          <div>
-            <span className="font-semibold text-zinc-400">Next exercise:</span>{' '}
-            {currentExerciseIdx < session.exercises.length - 1
-              ? session.exercises[currentExerciseIdx + 1].name
-              : 'Cardio Finisher'}
-          </div>
-          <button
-            onClick={() => setShowEndConfirm(true)}
-            className="flex items-center gap-1 font-semibold text-white hover:text-zinc-300 transition-colors cursor-pointer animate-pulse"
-          >
-            End workout <ArrowRight size={12} />
-          </button>
+      <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500 relative z-10">
+        <div>
+          <span className="font-semibold text-zinc-400">Next exercise:</span>{' '}
+          {currentExerciseIdx < session.exercises.length - 1
+            ? session.exercises[currentExerciseIdx + 1].name
+            : 'Cardio Finisher'}
         </div>
-      )}
+        <button
+          onClick={() => setShowEndConfirm(true)}
+          className="flex items-center gap-1 font-semibold text-white hover:text-zinc-300 transition-colors cursor-pointer animate-pulse"
+        >
+          End workout <ArrowRight size={12} />
+        </button>
+      </div>
 
       {/* Exercise History Per Movement Modal */}
       <AnimatePresence>
@@ -779,6 +852,183 @@ export default function CrucibleView({
                   Finalize Log
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Barbell Plate Calculator Drawer */}
+      <AnimatePresence>
+        {showPlateCalc && (
+          <div 
+            className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/75 backdrop-blur-sm"
+            onClick={() => setShowPlateCalc(false)}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-panel border-white/10 bg-obsidian rounded-t-[32px] p-6 w-full max-w-sm shadow-2xl relative"
+            >
+              {/* Drag Handle */}
+              <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-5" />
+              
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Plate Calculator</h3>
+                <span className="text-[9px] font-mono text-zinc-400 bg-white/5 border border-white/5 rounded px-2 py-0.5 uppercase">
+                  {units === 'imperial' ? 'Lbs Mode' : 'Kg Mode'}
+                </span>
+              </div>
+
+              {/* Weight Adjustment row inside calculator */}
+              <div className="flex items-center justify-between bg-white/5 border border-white/5 rounded-2xl p-3 mb-6">
+                <button
+                  onClick={() => {
+                    const step = units === 'imperial' ? 5 : 2.5;
+                    setWeight(prev => Math.max(0, (parseFloat(prev) || 0) - step).toFixed(1));
+                  }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white cursor-pointer active:scale-95 transition-all"
+                >
+                  <Minus size={12} />
+                </button>
+                <div className="text-center">
+                  <span className="text-[8px] uppercase tracking-wider text-zinc-500 font-bold block">Target Weight</span>
+                  <span className="text-2xl font-black text-white font-mono leading-none">
+                    {weight || '0'} <span className="text-xs font-bold text-zinc-400">{units === 'imperial' ? 'lbs' : 'kg'}</span>
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const step = units === 'imperial' ? 5 : 2.5;
+                    setWeight(prev => ((parseFloat(prev) || 0) + step).toFixed(1));
+                  }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white cursor-pointer active:scale-95 transition-all"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+
+              {/* Calculation Output */}
+              {(() => {
+                const targetW = parseFloat(weight) || 0;
+                const { plates, remaining, barWeight } = calculatePlates(targetW, units === 'imperial');
+                
+                // Color mapping for plates
+                const getPlateColor = (p: number) => {
+                  if (units === 'imperial') {
+                    if (p >= 45) return 'bg-red-500 border-red-400';
+                    if (p >= 35) return 'bg-blue-500 border-blue-400';
+                    if (p >= 25) return 'bg-yellow-500 border-yellow-400';
+                    if (p >= 10) return 'bg-green-500 border-green-400';
+                    if (p >= 5) return 'bg-zinc-400 border-zinc-300 text-black';
+                    return 'bg-zinc-600 border-zinc-500';
+                  } else {
+                    if (p >= 25) return 'bg-red-500 border-red-400';
+                    if (p >= 20) return 'bg-blue-500 border-blue-400';
+                    if (p >= 15) return 'bg-yellow-500 border-yellow-400';
+                    if (p >= 10) return 'bg-green-500 border-green-400';
+                    if (p >= 5) return 'bg-zinc-400 border-zinc-300 text-black';
+                    if (p >= 2.5) return 'bg-zinc-600 border-zinc-500';
+                    return 'bg-zinc-300 border-zinc-200 text-black';
+                  }
+                };
+
+                const getPlateHeightClass = (p: number) => {
+                  if (units === 'imperial') {
+                    if (p >= 45) return 'h-24 w-4';
+                    if (p >= 35) return 'h-22 w-4';
+                    if (p >= 25) return 'h-20 w-4';
+                    if (p >= 10) return 'h-16 w-3';
+                    if (p >= 5) return 'h-14 w-3';
+                    return 'h-12 w-2.5';
+                  } else {
+                    if (p >= 25) return 'h-24 w-4';
+                    if (p >= 20) return 'h-22 w-4';
+                    if (p >= 15) return 'h-20 w-4';
+                    if (p >= 10) return 'h-18 w-3';
+                    if (p >= 5) return 'h-15 w-3';
+                    if (p >= 2.5) return 'h-13 w-2.5';
+                    return 'h-11 w-2';
+                  }
+                };
+
+                return (
+                  <div className="flex flex-col gap-5">
+                    {/* Visual Barbell Graphic */}
+                    <div className="h-32 bg-black/40 rounded-2xl border border-white/5 flex items-center justify-center p-4 overflow-x-auto relative">
+                      {plates.length === 0 ? (
+                        <div className="text-[10px] text-zinc-500 text-center font-mono">
+                          {targetW <= barWeight 
+                            ? `Load only the empty ${barWeight}${units === 'imperial' ? 'lb' : 'kg'} bar.` 
+                            : 'Set weight above bar weight to view plates.'}
+                        </div>
+                      ) : (
+                        <div className="flex items-center">
+                          {/* Bar sleeve */}
+                          <div className="w-10 h-3 bg-zinc-700 rounded-l border border-zinc-600 relative flex-shrink-0" />
+                          {/* Inner collar */}
+                          <div className="w-2.5 h-10 bg-zinc-500 border border-zinc-400 relative flex-shrink-0 z-10" />
+                          
+                          {/* Stacked plates */}
+                          <div className="flex items-center gap-[1px] relative z-10">
+                            {plates.map(({ plate, count }, pIdx) => (
+                              <React.Fragment key={pIdx}>
+                                {Array.from({ length: count }).map((_, cIdx) => (
+                                  <div
+                                    key={cIdx}
+                                    className={`rounded-md flex items-center justify-center font-mono text-[8px] font-black text-white shadow-md border ${getPlateColor(plate)} ${getPlateHeightClass(plate)}`}
+                                  >
+                                    <span className="rotate-90 origin-center whitespace-nowrap">{plate}</span>
+                                  </div>
+                                ))}
+                              </React.Fragment>
+                            ))}
+                          </div>
+                          
+                          {/* Bar sleeve extension */}
+                          <div className="w-12 h-2 bg-zinc-600 rounded-r border border-zinc-500 flex-shrink-0" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Breakdown list details */}
+                    <div className="flex flex-col gap-2">
+                      <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                        Plates Per Side (Double for total)
+                      </span>
+                      {plates.length === 0 ? (
+                        <div className="text-[10px] text-zinc-500 italic">No plates required.</div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          {plates.map(({ plate, count }, idx) => (
+                            <div key={idx} className="flex justify-between items-center text-[10px] border border-white/5 bg-white/[0.02] rounded-xl px-3 py-2 font-mono">
+                              <span className="text-zinc-400 font-medium">{plate} {units === 'imperial' ? 'lbs' : 'kg'}</span>
+                              <span className="text-white font-extrabold bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                                x {count}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {remaining > 0 && (
+                        <div className="text-[9px] text-amber-500 font-mono mt-1 text-center">
+                          * Remaining discrepancy: {remaining.toFixed(2)} {units === 'imperial' ? 'lbs' : 'kg'} (microplates recommended).
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => setShowPlateCalc(false)}
+                      className="w-full mt-2 py-3 bg-white hover:bg-zinc-200 text-black text-xs font-bold uppercase rounded-xl transition-all cursor-pointer text-center"
+                    >
+                      Close Calculator
+                    </button>
+                  </div>
+                );
+              })()}
             </motion.div>
           </div>
         )}

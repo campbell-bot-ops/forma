@@ -10,8 +10,16 @@ interface LoadingScreenProps {
 
 export default function LoadingScreen({ onFinished }: LoadingScreenProps) {
   const [progress, setProgress] = useState(0);
+  const [shouldRender, setShouldRender] = useState(false);
 
   useEffect(() => {
+    // Avoid showing the loading screen on repeat visits/reloads
+    if (typeof window !== 'undefined' && sessionStorage.getItem('forma_loading_shown') === 'true') {
+      onFinished();
+      return;
+    }
+    setShouldRender(true);
+
     // Increment progress line over 2.2 seconds
     const duration = 2200;
     const intervalTime = 20;
@@ -34,6 +42,8 @@ export default function LoadingScreen({ onFinished }: LoadingScreenProps) {
 
     return () => clearInterval(timer);
   }, [onFinished]);
+
+  if (!shouldRender) return null;
 
   return (
     <motion.div

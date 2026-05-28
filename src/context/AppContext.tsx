@@ -70,12 +70,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [showLoading, setShowLoading] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return !sessionStorage.getItem('forma_loading_shown');
-    }
-    return true;
-  });
+  const [showLoading, setShowLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [user, setUser] = useState<UserSession | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('horizon');
@@ -127,6 +122,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       window.addEventListener('online', goOnline);
       window.addEventListener('offline', goOffline);
 
+      // Register service worker for PWA support
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+          .then(reg => console.log('FORMA: Service Worker registered successfully with scope:', reg.scope))
+          .catch(err => console.error('FORMA: Service Worker registration failed:', err));
+      }
+
       // Load initial settings
       const storedHaptic = localStorage.getItem('forma_setting_haptic');
       if (storedHaptic !== null) {
@@ -171,6 +173,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Initial load
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const shown = sessionStorage.getItem('forma_loading_shown');
+      if (shown === 'true') {
+        setShowLoading(false);
+      }
+    }
+
     async function loadData() {
       const liveSession = await db.getLiveSession();
       setUser(liveSession);

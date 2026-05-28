@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Settings, Info, ToggleLeft, ToggleRight, Trash2, TrendingUp, Heart, Bell, Smartphone, Sparkles, Check } from 'lucide-react';
+import { User, Settings, Info, ToggleLeft, ToggleRight, Trash2, TrendingUp, Heart, Bell, Smartphone, Sparkles, Check, AlertTriangle } from 'lucide-react';
 import { db } from '@/utils/db';
 import { useApp } from '@/context/AppContext';
 
@@ -82,6 +82,7 @@ export default function ProfileView() {
   const [selectedHealthPlatform, setSelectedHealthPlatform] = useState<'apple' | 'google' | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const isImperial = userProfile.units === 'imperial';
 
@@ -170,10 +171,21 @@ export default function ProfileView() {
           setNotificationsEnabled(true);
           localStorage.setItem('forma_notifications_enabled', 'true');
           triggerHaptic([30, 50, 30]);
-          new Notification('FORMA Integrated', {
-            body: 'System sync active. You will receive daily mobility and water reminders.',
-            icon: '/Frame 166.png'
-          });
+          
+          if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.ready;
+            reg.showNotification('FORMA Integrated', {
+              body: 'System sync active. You will receive daily mobility and water reminders.',
+              icon: '/Frame 166.png',
+              badge: '/Frame 166.png'
+            });
+          } else {
+            new Notification('FORMA Integrated', {
+              body: 'System sync active. You will receive daily mobility and water reminders.',
+              icon: '/Frame 166.png'
+            });
+          }
+          
           setShowToast('Daily reminders active!');
           setTimeout(() => setShowToast(null), 2500);
         } else {
@@ -278,10 +290,10 @@ export default function ProfileView() {
     >
       {/* Title */}
       <div className="text-center py-2">
-        <h1 className="text-xl font-bold tracking-tight text-white uppercase">
+        <h1 className="text-xl font-bold tracking-tight text-white-adj uppercase">
           Profile & Settings
         </h1>
-        <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-medium">
+        <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500-adj font-medium">
           Your biometrics and settings
         </p>
       </div>
@@ -319,13 +331,13 @@ export default function ProfileView() {
             </div>
             
             <div>
-              <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+              <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                 USER PROFILE
               </span>
-              <h2 className="text-xl font-bold text-white tracking-tight">
+              <h2 className="text-xl font-bold text-white-adj tracking-tight">
                 {userProfile.name}
               </h2>
-              <p className="text-xs text-zinc-400 font-mono mt-0.5">
+              <p className="text-xs text-zinc-400-adj font-mono mt-0.5">
                 Genesis 4-Day Split
               </p>
             </div>
@@ -334,33 +346,33 @@ export default function ProfileView() {
           {/* Biometrics Summary */}
           <motion.div variants={itemVariants} className="grid grid-cols-3 gap-4 text-center">
             <div className="glass-panel rounded-2xl p-4 flex flex-col justify-between min-h-[90px]">
-              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+              <span className="text-[9px] uppercase tracking-wider text-zinc-500-adj font-bold block mb-1">
                 Weight
               </span>
-              <p className="text-base font-bold text-white font-mono">
+              <p className="text-base font-bold text-white-adj font-mono">
                 {weightText}
               </p>
-              <span className="text-[8px] text-zinc-500 mt-1 block">Baseline</span>
+              <span className="text-[8px] text-zinc-500-adj mt-1 block">Baseline</span>
             </div>
             
             <div className="glass-panel rounded-2xl p-4 flex flex-col justify-between min-h-[90px]">
-              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+              <span className="text-[9px] uppercase tracking-wider text-zinc-500-adj font-bold block mb-1">
                 Height
               </span>
-              <p className="text-base font-bold text-white font-mono">
+              <p className="text-base font-bold text-white-adj font-mono">
                 {heightText}
               </p>
-              <span className="text-[8px] text-zinc-500 mt-1 block">BMI {bmi}</span>
+              <span className="text-[8px] text-zinc-500-adj mt-1 block">BMI {bmi}</span>
             </div>
 
             <div className="glass-panel rounded-2xl p-4 flex flex-col justify-between min-h-[90px]">
-              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+              <span className="text-[9px] uppercase tracking-wider text-zinc-500-adj font-bold block mb-1">
                 Body Fat
               </span>
-              <p className="text-base font-bold text-white font-mono">
+              <p className="text-base font-bold text-white-adj font-mono">
                 {userProfile.bodyFat}%
               </p>
-              <span className="text-[8px] text-zinc-500 mt-1 block">Target: 10%</span>
+              <span className="text-[8px] text-zinc-500-adj mt-1 block">Target: 10%</span>
             </div>
           </motion.div>
 
@@ -437,20 +449,19 @@ export default function ProfileView() {
               </div>
             )}
 
-            {/* Log form */}
-            <form onSubmit={handleAddWeight} className="flex gap-2">
+            <form onSubmit={handleAddWeight} className="relative flex items-center w-full">
               <input
                 type="number"
                 step="0.1"
                 required
-                placeholder={`Log weight in ${isImperial ? 'lbs' : 'kg'}`}
+                placeholder={`Weight (${isImperial ? 'lbs' : 'kg'})`}
                 value={newWeight}
                 onChange={(e) => setNewWeight(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-400 font-mono"
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-3 pr-24 py-2.5 text-xs text-white-adj focus:outline-none focus:border-zinc-400 font-mono"
               />
               <button
                 type="submit"
-                className="bg-white hover:bg-zinc-200 text-black text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap"
+                className="absolute right-1 top-1 bottom-1 bg-white hover:bg-zinc-200 text-black text-[10px] font-bold px-3 rounded-lg transition-all cursor-pointer whitespace-nowrap flex items-center justify-center"
               >
                 Log Today
               </button>
@@ -469,9 +480,9 @@ export default function ProfileView() {
                   const dispW = isImperial ? `${(log.weight * 2.20462).toFixed(1)} lbs` : `${log.weight.toFixed(1)} kg`;
                   return (
                     <div key={log.date} className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1">
-                      <span className="text-zinc-500 font-mono">{dateFormatted}</span>
+                      <span className="text-zinc-500-adj font-mono">{dateFormatted}</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-white font-mono font-semibold">{dispW}</span>
+                        <span className="text-white-adj font-mono font-semibold">{dispW}</span>
                         <button
                           type="button"
                           onClick={() => handleDeleteWeight(log.date)}
@@ -490,24 +501,24 @@ export default function ProfileView() {
           {/* Advanced Body Composition readouts */}
           <motion.div variants={itemVariants} className="glass-panel rounded-3xl p-5">
             <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-2">
-              <Settings size={14} className="text-zinc-500" />
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
+              <Settings size={14} className="text-zinc-500-adj" />
+              <span className="text-[10px] font-bold text-zinc-400-adj uppercase tracking-widest font-mono">
                 Body Composition & TDEE
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                   Lean Muscle Mass
                 </span>
-                <span className="text-xl font-bold text-white font-mono">
+                <span className="text-xl font-bold text-white-adj font-mono">
                   {isImperial ? `${(leanMassKg * 2.20462).toFixed(1)} lbs` : `${leanMassKg.toFixed(1)} kg`}
                 </span>
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                   TDEE Maintenance
                 </span>
                 <span className="text-xl font-bold text-cyan-400 font-mono">
@@ -520,19 +531,19 @@ export default function ProfileView() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                   FFMI (Fat-Free Mass)
                 </span>
-                <span className="text-sm font-semibold text-white font-mono">
+                <span className="text-sm font-semibold text-white-adj font-mono">
                   {ffmi.toFixed(2)}
                 </span>
               </div>
 
               <div className="flex flex-col gap-0.5">
-                <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                <span className="text-[9px] text-zinc-500-adj uppercase tracking-widest font-bold font-mono">
                   Height-Adjusted FFMI
                 </span>
-                <span className="text-sm font-semibold text-white font-mono">
+                <span className="text-sm font-semibold text-white-adj font-mono">
                   {normalizedFfmi.toFixed(2)}
                 </span>
               </div>
@@ -559,18 +570,18 @@ export default function ProfileView() {
               {/* Toggle 1: Zero-UI Input */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Smart Set Prediction
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Pre-fill weights and reps from your last workout for faster logging.
                   </p>
                 </div>
                 <button
                   onClick={setZeroUiEnabled}
-                  className="text-white focus:outline-none cursor-pointer transition-colors"
+                  className="text-white-adj focus:outline-none cursor-pointer transition-colors"
                 >
-                  {zeroUiEnabled ? <ToggleRight size={38} className="text-zinc-300" /> : <ToggleLeft size={38} className="text-zinc-600" />}
+                  {zeroUiEnabled ? <ToggleRight size={38} className="text-zinc-300-adj" /> : <ToggleLeft size={38} className="text-zinc-600" />}
                 </button>
               </div>
 
@@ -579,18 +590,18 @@ export default function ProfileView() {
               {/* Toggle 2: Auto-Regulated Overload */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Automatic Weight Progression
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Automatically add weight next week if your sets feel too easy (RPE 7 or lower).
                   </p>
                 </div>
                 <button
                   onClick={setAutoOverloadEnabled}
-                  className="text-white focus:outline-none cursor-pointer transition-colors"
+                  className="text-white-adj focus:outline-none cursor-pointer transition-colors"
                 >
-                  {autoOverloadEnabled ? <ToggleRight size={38} className="text-zinc-300" /> : <ToggleLeft size={38} className="text-zinc-600" />}
+                  {autoOverloadEnabled ? <ToggleRight size={38} className="text-zinc-300-adj" /> : <ToggleLeft size={38} className="text-zinc-600" />}
                 </button>
               </div>
 
@@ -599,18 +610,18 @@ export default function ProfileView() {
               {/* Toggle 3: Haptic Feedback */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Haptic Vibrations
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Physical vibration confirmations on logged sets, rest timer completions, and milestones.
                   </p>
                 </div>
                 <button
                   onClick={toggleHaptic}
-                  className="text-white focus:outline-none cursor-pointer transition-colors"
+                  className="text-white-adj focus:outline-none cursor-pointer transition-colors"
                 >
-                  {hapticEnabled ? <ToggleRight size={38} className="text-zinc-300" /> : <ToggleLeft size={38} className="text-zinc-600" />}
+                  {hapticEnabled ? <ToggleRight size={38} className="text-zinc-300-adj" /> : <ToggleLeft size={38} className="text-zinc-600" />}
                 </button>
               </div>
 
@@ -619,10 +630,10 @@ export default function ProfileView() {
               {/* Health Sync Row */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Health Integrations
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Synchronize your weight logs, energy burned, and workouts to Apple Health or Google Fit.
                   </p>
                 </div>
@@ -640,7 +651,7 @@ export default function ProfileView() {
                   className={`px-3 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-wider cursor-pointer transition-colors ${
                     healthConnected !== 'none'
                       ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/30'
-                      : 'border-white/10 bg-white/5 hover:bg-white/10 text-white'
+                      : 'border-white/10 bg-white/5 hover:bg-white/10 text-white-adj'
                   }`}
                 >
                   {healthConnected === 'apple' ? 'Apple Connected' : healthConnected === 'google' ? 'Google Connected' : 'Connect Health'}
@@ -652,10 +663,10 @@ export default function ProfileView() {
               {/* Push Notifications Row */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     PWA Reminders
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Enable daily mobility, water, and rest day check-in reminders.
                   </p>
                 </div>
@@ -664,7 +675,7 @@ export default function ProfileView() {
                   className={`px-3 py-1.5 rounded-lg border text-[9px] font-bold uppercase tracking-wider cursor-pointer transition-colors ${
                     notificationsEnabled
                       ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/30'
-                      : 'border-white/10 bg-white/5 hover:bg-white/10 text-white'
+                      : 'border-white/10 bg-white/5 hover:bg-white/10 text-white-adj'
                   }`}
                 >
                   {notificationsEnabled ? 'Reminders Active' : 'Enable Reminders'}
@@ -676,10 +687,10 @@ export default function ProfileView() {
               {/* Measurement Units */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Measurement Units
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Switch between Metric (kg, cm, km) and Imperial (lbs, feet-inches, miles).
                   </p>
                 </div>
@@ -688,7 +699,7 @@ export default function ProfileView() {
                     const nextUnits = userProfile.units === 'imperial' ? 'metric' : 'imperial';
                     onUpdateProfile({ ...userProfile, units: nextUnits });
                   }}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
+                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white-adj uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
                 >
                   {userProfile.units === 'imperial' ? 'Imperial' : 'Metric'}
                 </button>
@@ -699,16 +710,16 @@ export default function ProfileView() {
               {/* Theme Toggle */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     Interface Theme
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Switch between Obsidian Dark and Swiss Minimalist Light modes.
                   </p>
                 </div>
                 <button
                   onClick={onToggleTheme}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
+                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white-adj uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
                 >
                   {theme === 'light' ? 'Light' : 'Dark'}
                 </button>
@@ -719,16 +730,16 @@ export default function ProfileView() {
               {/* Onboarding Tour */}
               <div className="flex items-center justify-between">
                 <div className="flex-1 pr-4">
-                  <h3 className="text-xs font-semibold text-white">
+                  <h3 className="text-xs font-semibold text-white-adj">
                     App Introduction
                   </h3>
-                  <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal font-light">
+                  <p className="text-[10px] text-zinc-500-adj mt-0.5 leading-normal font-light">
                     Replay the 3-slide introduction guide to muscle decay and CNS auto-overloads.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowOnboarding(true)}
-                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
+                  className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[9px] font-bold text-white-adj uppercase tracking-wider cursor-pointer hover:bg-white/10 transition-colors"
                 >
                   Replay Tour
                 </button>
@@ -739,28 +750,28 @@ export default function ProfileView() {
           {/* Program Parameters */}
           <motion.div variants={itemVariants} className="glass-panel rounded-2xl p-5 w-full">
             <div className="flex items-center gap-2 mb-3">
-              <Settings size={14} className="text-zinc-500" />
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+              <Settings size={14} className="text-zinc-500-adj" />
+              <span className="text-[10px] font-bold text-zinc-400-adj uppercase tracking-widest">
                 Training Targets
               </span>
             </div>
 
             <div className="space-y-3 text-xs">
               <div className="flex justify-between items-center py-1 border-b border-white/5">
-                <span className="text-zinc-500">Suggested Workout Time</span>
-                <span className="text-white font-mono">60 Minutes</span>
+                <span className="text-zinc-500-adj">Suggested Workout Time</span>
+                <span className="text-white-adj font-mono">60 Minutes</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-white/5">
-                <span className="text-zinc-500">Scheduled Days</span>
-                <span className="text-white font-mono">Mon / Tue / Thu / Fri</span>
+                <span className="text-zinc-500-adj">Scheduled Days</span>
+                <span className="text-white-adj font-mono">Mon / Tue / Thu / Fri</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-white/5">
-                <span className="text-zinc-500">Cardio Target</span>
-                <span className="text-white font-mono">30 Min LISS Incline Walking</span>
+                <span className="text-zinc-500-adj">Cardio Target</span>
+                <span className="text-white-adj font-mono">30 Min LISS Incline Walking</span>
               </div>
               <div className="flex justify-between items-center py-1">
-                <span className="text-zinc-500">Program Status</span>
-                <span className="text-white font-mono text-[10px] font-semibold text-emerald-400 uppercase tracking-widest">
+                <span className="text-zinc-500-adj">Program Status</span>
+                <span className="text-white-adj font-mono text-[10px] font-semibold text-emerald-400 uppercase tracking-widest">
                   On Track
                 </span>
               </div>
@@ -771,15 +782,13 @@ export default function ProfileView() {
           <motion.div variants={itemVariants} className="w-full grid grid-cols-2 gap-4">
             <button
               onClick={onSignOut}
-              className="py-4 border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/20 text-xs text-zinc-300 font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="py-4 border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/20 text-xs text-white-adj font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               Sign Out
             </button>
             <button
               onClick={() => {
-                if (confirm('Are you sure you want to reset all workout history and targets? This action is irreversible.')) {
-                  onResetData();
-                }
+                setShowResetConfirm(true);
               }}
               className="py-4 border border-red-950/20 bg-red-950/5 hover:bg-red-950/15 text-xs text-red-400 font-bold uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
@@ -831,21 +840,21 @@ export default function ProfileView() {
                 <Heart size={24} className="animate-pulse" />
               </div>
               
-              <h3 className="text-lg font-bold text-white mb-2">Connect Health Platform</h3>
-              <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+              <h3 className="text-lg font-bold text-white-adj mb-2">Connect Health Platform</h3>
+              <p className="text-xs text-zinc-400-adj mb-6 leading-relaxed">
                 FORMA requires read/write access to sync workouts, active energy, weight history, and heart rate details.
               </p>
               
               <div className="space-y-2 mb-6 text-left border-y border-white/5 py-4">
-                <div className="flex items-center gap-2.5 text-xs text-zinc-300">
+                <div className="flex items-center gap-2.5 text-xs text-zinc-300-adj">
                   <Check size={14} className="text-emerald-400" />
                   <span>Workouts & Fitness Records</span>
                 </div>
-                <div className="flex items-center gap-2.5 text-xs text-zinc-300">
+                <div className="flex items-center gap-2.5 text-xs text-zinc-300-adj">
                   <Check size={14} className="text-emerald-400" />
                   <span>Active Energy (Calories Burned)</span>
                 </div>
-                <div className="flex items-center gap-2.5 text-xs text-zinc-300">
+                <div className="flex items-center gap-2.5 text-xs text-zinc-300-adj">
                   <Check size={14} className="text-emerald-400" />
                   <span>Body Mass & Weight ledger</span>
                 </div>
@@ -870,10 +879,53 @@ export default function ProfileView() {
               
               <button
                 onClick={() => setShowHealthModal(false)}
-                className="w-full py-2.5 border border-white/5 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                className="w-full py-2.5 border border-white/5 bg-white/5 hover:bg-white/10 text-white-adj text-xs font-semibold rounded-xl transition-all cursor-pointer"
               >
                 Cancel
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Custom Reset Confirmation Modal */}
+      <AnimatePresence>
+        {showResetConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="glass-panel border-red-950/30 bg-obsidian rounded-3xl p-6 max-w-sm w-full text-center relative z-50 shadow-2xl"
+            >
+              <div className="w-12 h-12 rounded-full bg-red-950/20 border border-red-900/30 flex items-center justify-center mx-auto mb-4 text-red-400 animate-pulse">
+                <AlertTriangle size={24} />
+              </div>
+              
+              <h3 className="text-lg font-bold text-white-adj mb-2">Reset Entire Training History?</h3>
+              <p className="text-xs text-zinc-400-adj mb-6 leading-relaxed">
+                This is a structural reset. Your entire workout history, target progressions, and custom split parameters will be completely wiped from the database. This action is irreversible.
+              </p>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowResetConfirm(false)}
+                  className="flex-1 py-3 border border-white/5 bg-white/5 hover:bg-white/10 text-white-adj text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowResetConfirm(false);
+                    await onResetData();
+                    setShowToast('All workout data has been reset.');
+                    setTimeout(() => setShowToast(null), 3000);
+                  }}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer active-glow shadow-lg shadow-red-600/25"
+                >
+                  Confirm Reset
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

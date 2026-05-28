@@ -6,6 +6,7 @@ import { WorkoutSession } from '@/constants/workout';
 import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle, Droplet } from 'lucide-react';
 import { UserProfile } from '@/utils/db';
 import Image from 'next/image';
+import { useApp } from '@/context/AppContext';
 
 const MOTIVATIONAL_QUOTES = [
   "Strip away feeds and streaks. Physical form should reflect the same essence as your professional craft.",
@@ -51,6 +52,28 @@ const getDayOfWeekVal = (day: number) => {
   return day === 0 ? 7 : day; // Sunday is 7, Monday is 1, ..., Saturday is 6
 };
 
+const exerciseTargets: Record<string, Record<string, number>> = {
+  'incline-db-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
+  'flat-bench-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
+  'lat-pulldowns': { Back: 1.0, Arms: 0.3 },
+  'seated-cable-rows': { Back: 1.0, Arms: 0.3 },
+  'bent-over-rows': { Back: 1.0, Arms: 0.3 },
+  'face-pulls': { Back: 0.5, Shoulders: 0.5 },
+  'overhead-press': { Shoulders: 1.0, Arms: 0.2 },
+  'lateral-raises': { Shoulders: 1.0 },
+  'bicep-curls-db': { Arms: 1.0 },
+  'tricep-overhead-extensions': { Arms: 1.0 },
+  'goblet-squat': { Quads: 1.0, Core: 0.3 },
+  'leg-press': { Quads: 0.8, Hamstrings: 0.2 },
+  'leg-extensions': { Quads: 1.0 },
+  'walking-lunges': { Quads: 0.6, Hamstrings: 0.4 },
+  'romanian-deadlifts': { Hamstrings: 1.0, Core: 0.3 },
+  'leg-curls': { Hamstrings: 1.0 },
+  'hanging-leg-raises': { Core: 1.0 },
+  'planks': { Core: 1.0 },
+  'weighted-russian-twists': { Core: 1.0 }
+};
+
 const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> => {
   const muscleFatigue: Record<string, number> = {
     Chest: 0,
@@ -60,28 +83,6 @@ const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> 
     Quads: 0,
     Hamstrings: 0,
     Core: 0
-  };
-
-  const exerciseTargets: Record<string, Record<string, number>> = {
-    'incline-db-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
-    'flat-bench-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
-    'lat-pulldowns': { Back: 1.0, Arms: 0.3 },
-    'seated-cable-rows': { Back: 1.0, Arms: 0.3 },
-    'bent-over-rows': { Back: 1.0, Arms: 0.3 },
-    'face-pulls': { Back: 0.5, Shoulders: 0.5 },
-    'overhead-press': { Shoulders: 1.0, Arms: 0.2 },
-    'lateral-raises': { Shoulders: 1.0 },
-    'bicep-curls-db': { Arms: 1.0 },
-    'tricep-overhead-extensions': { Arms: 1.0 },
-    'goblet-squat': { Quads: 1.0, Core: 0.3 },
-    'leg-press': { Quads: 0.8, Hamstrings: 0.2 },
-    'leg-extensions': { Quads: 1.0 },
-    'walking-lunges': { Quads: 0.6, Hamstrings: 0.4 },
-    'romanian-deadlifts': { Hamstrings: 1.0, Core: 0.3 },
-    'leg-curls': { Hamstrings: 1.0 },
-    'hanging-leg-raises': { Core: 1.0 },
-    'planks': { Core: 1.0 },
-    'weighted-russian-twists': { Core: 1.0 }
   };
 
   const decayRates: Record<string, number> = {
@@ -155,12 +156,71 @@ interface HorizonViewProps {
 }
 
 export default function HorizonView({ sessions, workoutHistory, onStartWorkout, onShareWorkout, userProfile, onEditProgram }: HorizonViewProps) {
+  const { theme } = useApp();
   const [quoteIdx, setQuoteIdx] = React.useState(getDayOfYearIndex());
   const [sleepHours, setSleepHours] = React.useState<number>(8.0);
   const [isSleepModalOpen, setIsSleepModalOpen] = React.useState(false);
   const [waterIntake, setWaterIntake] = React.useState<number>(0);
   const [activeTab, setActiveTab] = React.useState<0 | 1>(0);
   const waterTarget = 3.0; // 3 Liters
+  
+  const [scrolled, setScrolled] = React.useState(false);
+  const [selectedMuscle, setSelectedMuscle] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 40);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Swipe touch/mouse handlers
+  const touchStartX = React.useRef<number | null>(null);
+  const touchStartY = React.useRef<number | null>(null);
+  const mouseStartX = React.useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    
+    const diffX = touchStartX.current - e.changedTouches[0].clientX;
+    const diffY = touchStartY.current - e.changedTouches[0].clientY;
+    
+    // Only trigger tab switch if the swipe was horizontal and exceeded threshold
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+      if (diffX > 0) {
+        setActiveTab(1);
+      } else {
+        setActiveTab(0);
+      }
+    }
+    
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Left click only
+    mouseStartX.current = e.clientX;
+  };
+
+  const handleMouseUp = (e: React.MouseEvent) => {
+    if (mouseStartX.current === null) return;
+    const diffX = mouseStartX.current - e.clientX;
+    if (Math.abs(diffX) > 50) {
+      if (diffX > 0) {
+        setActiveTab(1);
+      } else {
+        setActiveTab(0);
+      }
+    }
+    mouseStartX.current = null;
+  };
 
   // Sync sleepHours and waterIntake from localStorage
   React.useEffect(() => {
@@ -314,6 +374,19 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
   const weeklyWorkoutTarget = 4;
   const weeklyWorkoutProgressPercent = Math.min(100, Math.round((completedWorkouts / weeklyWorkoutTarget) * 100));
 
+  // Calculate completed days in current week (0 = Mon, 1 = Tue ... 6 = Sun)
+  const completedDays = Array(7).fill(false);
+  workoutHistory.forEach(log => {
+    const logDate = new Date(log.date);
+    if (logDate >= startOfWeek && log.actualTonnage > 0) {
+      const day = logDate.getDay();
+      const index = day === 0 ? 6 : day - 1;
+      if (index >= 0 && index < 7) {
+        completedDays[index] = true;
+      }
+    }
+  });
+
   // Determine dynamic consistency status
   const currentDayOfWeek = new Date().getDay(); // 0 = Sun, 1 = Mon ...
   let consistencyStatus = "ON TRACK";
@@ -415,19 +488,33 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
           height={28}
           priority
           style={{ height: 'auto' }}
-          className="h-7 w-auto object-contain animate-fade-in"
+          className={`h-7 w-auto object-contain animate-fade-in ${theme === 'light' ? 'invert' : ''}`}
         />
-        {onEditProgram ? (
-          <button
-            onClick={onEditProgram}
-            className="px-2.5 py-1 rounded-lg text-zinc-400 hover:text-white bg-white/5 border border-white/10 hover:border-white/20 transition-all cursor-pointer text-[9px] font-bold uppercase tracking-wider font-mono shadow-sm"
-          >
-            Edit Split
-          </button>
-        ) : (
-          <div className="w-16" />
-        )}
+        <div className="w-16" />
       </div>
+
+      {/* Greetings Section */}
+      <motion.div variants={itemVariants} className="px-1 flex flex-col gap-1">
+        <h2 className="text-xl font-bold tracking-tight text-white-adj font-sans">
+          {(() => {
+            const hour = new Date().getHours();
+            if (hour < 12) return 'Good Morning';
+            if (hour < 17) return 'Good Afternoon';
+            return 'Good Evening';
+          })()}, {userProfile?.name?.split(' ')[0] || 'Athlete'}
+        </h2>
+        <p className="text-xs text-zinc-400-adj font-sans leading-normal">
+          {todayWorkout ? (
+            todayWorkout.type === 'workout' ? (
+              <>Ready to execute? Today's focus is <span className="text-white-adj font-semibold">{todayWorkout.title}</span> ({todayWorkout.focus}).</>
+            ) : (
+              <>Recovery phase active. Today is designated for <span className="text-white-adj font-semibold">{todayWorkout.title}</span>.</>
+            )
+          ) : (
+            'Welcome back. Ready for your next session?'
+          )}
+        </p>
+      </motion.div>
 
       {/* Responsive Dashboard Split Grid (stacked on mobile, side-by-side on desktop) */}
       <div className="grid grid-cols-12 gap-6 w-full items-start">
@@ -464,77 +551,99 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
             </div>
 
             {/* Swipeable Tabs Container */}
-            <div className="relative overflow-hidden w-full select-none cursor-grab active:cursor-grabbing">
+            <div 
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
+              className="relative overflow-hidden w-full select-none cursor-ew-resize"
+            >
               <motion.div
                 className="flex w-[200%]"
                 animate={{ x: activeTab === 0 ? '0%' : '-50%' }}
                 transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-                drag="x"
-                dragConstraints={{ left: 0, right: 0 }}
-                dragElastic={0.25}
-                onDragEnd={(e, info) => {
-                  const swipeThreshold = 50;
-                  if (info.offset.x < -swipeThreshold) {
-                    setActiveTab(1);
-                  } else if (info.offset.x > swipeThreshold) {
-                    setActiveTab(0);
-                  }
-                }}
               >
                 {/* Tab 1: Performance Focus (5-span Map, 7-span Pills) */}
                 <div className="w-1/2 flex-shrink-0 grid grid-cols-12 gap-3 sm:gap-4 pr-1.5 sm:pr-2">
                   
-                  {/* Left: Weekly Progress Circle Map */}
-                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-5 flex flex-col items-center justify-center min-h-[180px] sm:min-h-[216px] relative overflow-hidden">
-                    <div className="relative flex items-center justify-center">
-                      <svg className="w-full h-auto max-w-[124px] sm:max-w-[150px] aspect-square" viewBox="0 0 128 128">
+                  {/* Left: Weekly Progress Circle Map Redesigned */}
+                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-4 flex flex-col items-center justify-between min-h-[180px] sm:min-h-[216px] relative overflow-hidden">
+                    <div className="absolute -bottom-8 -right-8 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+                    
+                    <span className="text-[8px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-widest font-mono">
+                      Consistency
+                    </span>
+
+                    <div className="relative flex items-center justify-center my-1">
+                      <svg className="w-16 h-16 sm:w-20 sm:h-20" viewBox="0 0 100 100">
                         <defs>
-                          <path id="top-curve" d="M 20,64 A 44,44 0 0,1 108,64" fill="transparent" />
-                          <path id="bottom-curve" d="M 108,64 A 44,44 0 0,1 20,64" fill="transparent" />
+                          <linearGradient id="weekly-progress-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#00f0ff" />
+                            <stop offset="100%" stopColor="#3b82f6" />
+                          </linearGradient>
                         </defs>
                         <circle
-                          cx="64"
-                          cy="64"
-                          r="54"
-                          style={{ stroke: 'var(--circle-track)' }}
-                          className="fill-transparent"
-                          strokeWidth="11"
+                          cx="50"
+                          cy="50"
+                          r="40"
+                          className="stroke-zinc-800/40 dark:stroke-zinc-800/60 fill-transparent"
+                          strokeWidth="7"
                         />
                         <circle
-                          cx="64"
-                          cy="64"
-                          r="54"
+                          cx="50"
+                          cy="50"
+                          r="40"
                           className="fill-transparent"
-                          strokeWidth="11"
-                          strokeDasharray="339.3"
-                          strokeDashoffset={339.3 - (339.3 * weeklyWorkoutProgressPercent) / 100}
+                          strokeWidth="7"
                           strokeLinecap="round"
-                          transform="rotate(-90 64 64)"
+                          strokeDasharray="251.2"
+                          strokeDashoffset={251.2 - (251.2 * weeklyWorkoutProgressPercent) / 100}
+                          transform="rotate(-90 50 50)"
                           style={{
-                            stroke: 'var(--foreground)',
+                            stroke: 'url(#weekly-progress-grad)',
                             transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
                           }}
                         />
-                        <text className="fill-zinc-500 text-[8px] sm:text-[9px] font-bold tracking-[0.15em] uppercase font-sans">
-                          <textPath href="#top-curve" startOffset="50%" textAnchor="middle">
-                            Weekly Map
-                          </textPath>
-                        </text>
-                        <text x="64" y="73" style={{ fill: 'var(--foreground)' }} className="text-2xl sm:text-3xl font-extrabold font-sans tracking-tighter" textAnchor="middle">
-                          {weeklyWorkoutProgressPercent}%
-                        </text>
-                        <text className="fill-zinc-500 text-[7px] sm:text-[8px] font-bold tracking-wider uppercase font-sans">
-                          <textPath href="#bottom-curve" startOffset="50%" textAnchor="middle">
-                            {completedWorkouts} of 4 Days
-                          </textPath>
-                        </text>
                       </svg>
-                      
-                      <div 
-                        style={{ borderColor: 'var(--card-bg-1)' }}
-                        className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 bg-[#2f80ed] text-white rounded-full flex items-center justify-center text-[8px] sm:text-[10px] font-extrabold shadow-lg shadow-blue-500/25 w-6 h-6 sm:w-7 sm:h-7 border-2"
-                      >
-                        +{completedWorkouts}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-sm sm:text-base font-extrabold text-white-adj font-mono leading-none">
+                          {completedWorkouts}
+                        </span>
+                        <span className="text-[6px] sm:text-[7px] text-zinc-500-adj uppercase font-bold tracking-wider mt-0.5">
+                          of 4 days
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="w-full">
+                      <div className="flex justify-between items-center px-0.5">
+                        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, idx) => {
+                          const completed = completedDays[idx];
+                          const isToday = currentDayOfWeek === (idx === 6 ? 0 : idx + 1);
+                          
+                          return (
+                            <div key={idx} className="flex flex-col items-center gap-0.5">
+                              <span className={`text-[6px] sm:text-[7px] font-bold ${isToday ? 'text-cyan-400' : 'text-zinc-500'}`}>
+                                {day}
+                              </span>
+                              <div 
+                                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center text-[7px] transition-all duration-300 ${
+                                  completed 
+                                    ? 'bg-cyan-500 text-black font-extrabold shadow-[0_0_8px_rgba(6,182,212,0.4)]'
+                                    : isToday 
+                                      ? 'border border-cyan-500/50 bg-cyan-950/10 text-cyan-400 animate-pulse'
+                                      : 'border border-white/5 bg-white/[0.02] text-zinc-600'
+                                }`}
+                              >
+                                {completed && (
+                                  <svg className="w-1.5 h-1.5 stroke-[3px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -892,22 +1001,22 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       <circle cx="30" cy="18" r="4" fill="none" stroke="#3f3f46" strokeWidth="1" />
                       
                       {/* Shoulders */}
-                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
-                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
+                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={`${getMuscleClass('Shoulders')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Shoulders')} />
+                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={`${getMuscleClass('Shoulders')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Shoulders')} />
                       
                       {/* Chest */}
-                      <path d="M 23 26 L 37 26 L 37 34 L 30 37 L 23 34 Z" fill="none" stroke={getMuscleColor('Chest')} strokeWidth="1.2" filter={`url(#${getGlowId('Chest')})`} className={getMuscleClass('Chest')} />
+                      <path d="M 23 26 L 37 26 L 37 34 L 30 37 L 23 34 Z" fill="none" stroke={getMuscleColor('Chest')} strokeWidth="1.2" filter={`url(#${getGlowId('Chest')})`} className={`${getMuscleClass('Chest')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Chest')} />
                       
                       {/* Abs (Core) */}
-                      <rect x="25" y="36" width="10" height="15" fill="none" stroke={getMuscleColor('Core')} strokeWidth="1.2" filter={`url(#${getGlowId('Core')})`} className={getMuscleClass('Core')} />
+                      <rect x="25" y="36" width="10" height="15" fill="none" stroke={getMuscleColor('Core')} strokeWidth="1.2" filter={`url(#${getGlowId('Core')})`} className={`${getMuscleClass('Core')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Core')} />
                       
                       {/* Arms */}
-                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
-                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
+                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={`${getMuscleClass('Arms')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Arms')} />
+                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={`${getMuscleClass('Arms')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Arms')} />
                       
                       {/* Quads */}
-                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={getMuscleClass('Quads')} />
-                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={getMuscleClass('Quads')} />
+                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={`${getMuscleClass('Quads')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Quads')} />
+                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Quads')} strokeWidth="1.2" filter={`url(#${getGlowId('Quads')})`} className={`${getMuscleClass('Quads')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Quads')} />
                     </g>
 
                     {/* Right Side: BACK VIEW */}
@@ -918,19 +1027,19 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       <circle cx="30" cy="18" r="4" fill="none" stroke="#3f3f46" strokeWidth="1" />
                       
                       {/* Shoulders */}
-                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
-                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={getMuscleClass('Shoulders')} />
+                      <ellipse cx="20" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={`${getMuscleClass('Shoulders')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Shoulders')} />
+                      <ellipse cx="40" cy="26" rx="3" ry="2.5" fill="none" stroke={getMuscleColor('Shoulders')} strokeWidth="1.2" filter={`url(#${getGlowId('Shoulders')})`} className={`${getMuscleClass('Shoulders')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Shoulders')} />
                       
                       {/* Upper/Lower Back */}
-                      <path d="M 22 26 L 38 26 L 35 44 L 30 51 L 25 44 Z" fill="none" stroke={getMuscleColor('Back')} strokeWidth="1.2" filter={`url(#${getGlowId('Back')})`} className={getMuscleClass('Back')} />
+                      <path d="M 22 26 L 38 26 L 35 44 L 30 51 L 25 44 Z" fill="none" stroke={getMuscleColor('Back')} strokeWidth="1.2" filter={`url(#${getGlowId('Back')})`} className={`${getMuscleClass('Back')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Back')} />
                       
                       {/* Arms */}
-                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
-                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={getMuscleClass('Arms')} />
+                      <rect x="15" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={`${getMuscleClass('Arms')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Arms')} />
+                      <rect x="41.5" y="29" width="3.5" height="16" rx="1.5" fill="none" stroke={getMuscleColor('Arms')} strokeWidth="1.2" filter={`url(#${getGlowId('Arms')})`} className={`${getMuscleClass('Arms')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Arms')} />
                       
                       {/* Hamstrings / Glutes */}
-                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={getMuscleClass('Hamstrings')} />
-                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={getMuscleClass('Hamstrings')} />
+                      <rect x="22" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={`${getMuscleClass('Hamstrings')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Hamstrings')} />
+                      <rect x="32" y="54" width="6" height="22" rx="2" fill="none" stroke={getMuscleColor('Hamstrings')} strokeWidth="1.2" filter={`url(#${getGlowId('Hamstrings')})`} className={`${getMuscleClass('Hamstrings')} cursor-pointer hover:opacity-80`} onClick={() => setSelectedMuscle('Hamstrings')} />
                     </g>
                   </svg>
                 </div>
@@ -949,7 +1058,11 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       colorClass = 'text-amber-400';
                     }
                     return (
-                      <div key={muscle} className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1">
+                      <div 
+                        key={muscle} 
+                        onClick={() => setSelectedMuscle(muscle)}
+                        className="flex justify-between items-center text-[10px] border-b border-white/5 pb-1 cursor-pointer hover:bg-white/5 px-1 rounded transition-colors"
+                      >
                         <span className="text-zinc-400 font-medium">{muscle}</span>
                         <div className="flex items-center gap-1.5">
                           <span className={`text-[8px] uppercase tracking-wider font-semibold ${colorClass} bg-white/[0.02] border border-white/5 rounded px-1`}>
@@ -1009,6 +1122,23 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                 const splitKeyLift = session.type === 'workout' ? (session.exercises.find(e => e.keyMovement) || session.exercises[0]) : null;
                 const splitGhostBest = splitKeyLift ? splitKeyLift.ghostSets[0] : null;
 
+                let isDecayed = false;
+                let decayedMuscleName = '';
+                if (session.type === 'workout' && session.exercises) {
+                  session.exercises.forEach(ex => {
+                    const targets = exerciseTargets[ex.id];
+                    if (targets) {
+                      Object.keys(targets).forEach(muscle => {
+                        const mScore = recovery[muscle] !== undefined ? recovery[muscle] : 100;
+                        if (mScore < 40) {
+                          isDecayed = true;
+                          decayedMuscleName = muscle;
+                        }
+                      });
+                    }
+                  });
+                }
+
                 return (
                   <motion.div
                     key={session.id}
@@ -1062,7 +1192,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                     className={`flex-none w-[260px] md:w-full snap-start glass-panel rounded-2xl p-5 cursor-pointer select-none transition-all duration-300 ${cardStyle}`}
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
                           Day {index + 1}
                         </span>
@@ -1083,16 +1213,21 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                             Pending
                           </span>
                         )}
+                        {isDecayed && !isLoggedThisWeek && (
+                          <span className="text-[7px] bg-red-950/40 text-red-400 border border-red-900/30 rounded px-1.5 py-0.2 font-semibold uppercase tracking-wide flex items-center gap-0.5 animate-pulse">
+                            ⚠️ Atrophy Risk ({decayedMuscleName})
+                          </span>
+                        )}
                       </div>
-                      <span className="text-[9px] text-zinc-400 font-medium px-2 py-0.5 rounded-full bg-white/5 border border-white/5 uppercase">
+                      <span className="text-[9px] text-zinc-400-adj font-medium px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 uppercase">
                         {session.day.slice(0, 3)}
                       </span>
                     </div>
 
-                    <h3 className="text-xl font-bold text-white tracking-tight mb-1">
+                    <h3 className="text-xl font-bold text-white-adj tracking-tight mb-1">
                       {session.title}
                     </h3>
-                    <p className="text-xs text-zinc-400 font-medium tracking-wide mb-4">
+                    <p className="text-xs text-zinc-400-adj font-medium tracking-wide mb-4">
                       {session.focus}
                     </p>
 
@@ -1100,18 +1235,18 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       {session.type === 'workout' && splitGhostBest && (
                         <>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Key Lift Target
                             </span>
-                            <span className="text-white font-bold truncate max-w-[140px] tabular-nums">
+                            <span className="text-white-adj font-bold truncate max-w-[140px] tabular-nums">
                               {splitGhostBest.weight}kg x {splitGhostBest.reps}
                             </span>
                           </div>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Target Lifts
                             </span>
-                            <span className="text-white font-bold tabular-nums">
+                            <span className="text-white-adj font-bold tabular-nums">
                               {session.totalTonnage.toLocaleString()} kg
                             </span>
                           </div>
@@ -1121,7 +1256,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       {session.type === 'recovery' && (
                         <>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Activity
                             </span>
                             <span className="text-cyan-400 font-bold uppercase tracking-wider">
@@ -1129,10 +1264,10 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                             </span>
                           </div>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Target Time
                             </span>
-                            <span className="text-white font-bold">
+                            <span className="text-white-adj font-bold">
                               20-30 mins
                             </span>
                           </div>
@@ -1142,7 +1277,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       {session.type === 'rest' && (
                         <>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Recovery State
                             </span>
                             <span className="text-emerald-400 font-bold uppercase tracking-wider">
@@ -1150,10 +1285,10 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                             </span>
                           </div>
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="text-zinc-500 uppercase font-medium tracking-wider">
+                            <span className="text-zinc-500-adj uppercase font-medium tracking-wider">
                               Recommendation
                             </span>
-                            <span className="text-white font-bold">
+                            <span className="text-white-adj font-bold">
                               Light stretching
                             </span>
                           </div>
@@ -1165,6 +1300,19 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
               })}
             </div>
           </motion.div>
+
+          {/* Edit Program / Split Button */}
+          {onEditProgram && (
+            <motion.button
+              variants={itemVariants}
+              whileHover={{ scale: 1.01, backgroundColor: 'rgba(255,255,255,0.05)' }}
+              whileTap={{ scale: 0.99 }}
+              onClick={onEditProgram}
+              className="w-full py-3.5 border border-white/10 hover:border-white/20 bg-white/5 rounded-2xl text-xs font-bold uppercase tracking-wider text-zinc-300 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm font-mono"
+            >
+              Edit Workout Split
+            </motion.button>
+          )}
 
           {/* Philosophy Quote */}
           <motion.div
@@ -1188,6 +1336,131 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
 
         </div>
       </div>
+
+      {/* Sticky Collapsed Header - Always mounted to avoid flash, animates opacity and scale/y offset */}
+      <motion.div
+        initial={false}
+        animate={{
+          y: scrolled ? 0 : -8,
+          opacity: scrolled ? 1 : 0
+        }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        className="fixed top-0 left-0 right-0 z-40 bg-[#020202]/90 backdrop-blur-md border-b border-white/5 py-3.5 px-4 flex items-center justify-between max-w-md mx-auto"
+        style={{ pointerEvents: scrolled ? 'auto' : 'none' }}
+      >
+        <div className="flex items-center gap-2">
+          <Image
+            src="/Frame 166.png"
+            alt="FORMA Logo"
+            width={70}
+            height={16}
+            priority
+            style={{ height: 'auto' }}
+            className="h-4 w-auto object-contain"
+          />
+          <span className="text-[10px] text-zinc-500 font-mono border-l border-white/10 pl-2">
+            {todayWorkout?.title}
+          </span>
+        </div>
+        {onEditProgram && (
+          <button
+            onClick={onEditProgram}
+            className="px-2.5 py-1 rounded text-[8px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white bg-white/5 border border-white/10 cursor-pointer"
+          >
+            Edit Split
+          </button>
+        )}
+      </motion.div>
+
+      {/* Anatomical Muscle Recovery Drawer */}
+      <AnimatePresence>
+        {selectedMuscle && (
+          <div 
+            className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/75 backdrop-blur-sm"
+            onClick={() => setSelectedMuscle(null)}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-panel border-white/10 bg-obsidian rounded-t-[32px] p-6 w-full max-w-md shadow-2xl relative"
+            >
+              {/* Drag Handle */}
+              <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-5" />
+              
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold text-white uppercase tracking-wider">{selectedMuscle} Status</h3>
+                <span className={`font-mono text-xs font-bold px-2 py-0.5 border rounded uppercase ${
+                  (recovery[selectedMuscle] !== undefined ? recovery[selectedMuscle] : 100) >= 70 
+                    ? 'text-cyan-400 border-cyan-950 bg-cyan-950/20' 
+                    : (recovery[selectedMuscle] !== undefined ? recovery[selectedMuscle] : 100) >= 40 
+                    ? 'text-amber-400 border-amber-950 bg-amber-950/20' 
+                    : 'text-red-400 border-red-950 bg-red-950/20'
+                }`}>
+                  {recovery[selectedMuscle] !== undefined ? recovery[selectedMuscle] : 100}% Recovered
+                </span>
+              </div>
+              
+              <p className="text-[11px] text-zinc-400 leading-relaxed mb-6 font-light">
+                {(() => {
+                  const score = recovery[selectedMuscle] !== undefined ? recovery[selectedMuscle] : 100;
+                  if (score >= 70) return 'CNS state is optimal. This muscle group is fully recovered, glycogen stores are restored, and it is ready for high-intensity progressive overloading.';
+                  if (score >= 40) return 'Moderate muscle fatigue is present. Standard hypertrophy weights are acceptable, but you should avoid hitting absolute failure and ensure strict control.';
+                  return 'Under-recovered muscle tissue. Atrophy indicators are active. Deload weights by 10% or apply passive rest to prevent chronic tissue damage.';
+                })()}
+              </p>
+
+              {/* History list for this muscle */}
+              <div className="flex flex-col gap-2.5">
+                <span className="text-[9px] uppercase tracking-[0.15em] text-zinc-500 font-bold block mb-1">
+                  Fatigue History (Last 3 Workouts)
+                </span>
+                {(() => {
+                  const logsWithThisMuscle = workoutHistory.filter(log => {
+                    if (!log.logs) return false;
+                    return Object.keys(log.logs).some(exId => {
+                      const targets = exerciseTargets[exId];
+                      return targets && targets[selectedMuscle] !== undefined;
+                    });
+                  }).slice(0, 3);
+
+                  if (logsWithThisMuscle.length === 0) {
+                    return <p className="text-[10px] text-zinc-600 italic py-2">No recent training stimulus found in database ledger.</p>;
+                  }
+
+                  return logsWithThisMuscle.map((log, idx) => {
+                    const exercises = Object.keys(log.logs).filter(exId => {
+                      const targets = exerciseTargets[exId];
+                      return targets && targets[selectedMuscle] !== undefined;
+                    }).map(exId => exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+
+                    return (
+                      <div key={idx} className="flex justify-between items-center text-[10px] border-b border-white/5 pb-2">
+                        <div>
+                          <span className="text-zinc-300 font-medium block">{exercises.join(', ')}</span>
+                          <span className="text-zinc-600 font-mono text-[8px] block mt-0.5">{new Date(log.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </div>
+                        <span className="text-white font-mono font-bold bg-white/5 border border-white/5 rounded px-2 py-0.5">
+                          {log.actualTonnage > 0 ? `${(log.actualTonnage / 1000).toFixed(1)}t vol` : 'Recovery'}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              <button
+                onClick={() => setSelectedMuscle(null)}
+                className="w-full mt-6 py-3.5 bg-white hover:bg-zinc-200 text-black text-xs font-bold uppercase rounded-xl transition-all cursor-pointer text-center"
+              >
+                Close Drawer
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Interactive Sleep Modal */}
       <AnimatePresence>
