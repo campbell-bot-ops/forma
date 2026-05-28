@@ -374,7 +374,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         exerciseCount: recentCompletedWorkout.logs ? Object.keys(recentCompletedWorkout.logs).length : 0,
         sessionType: 'workout',
         logs: recentCompletedWorkout.logs,
-        cardioDetails: cardioStats
+        cardioDetails: {
+          ...(recentCompletedWorkout.cardioDetails || {}),
+          ...cardioStats
+        }
       });
       setShareModalOpen(true);
     }

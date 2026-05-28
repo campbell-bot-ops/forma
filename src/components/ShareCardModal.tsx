@@ -16,12 +16,13 @@ interface ShareCardModalProps {
   sessionType?: 'workout' | 'recovery';
   logs?: any;
   cardioDetails?: {
-    duration: number;
-    distance: number;
-    calories: number;
-    speed: number;
-    incline: number;
-    units: 'metric' | 'imperial';
+    duration?: number;
+    workoutDuration?: number;
+    distance?: number;
+    calories?: number;
+    speed?: number;
+    incline?: number;
+    units?: 'metric' | 'imperial';
   };
   recoveryDetails?: {
     activity: string;
@@ -269,6 +270,20 @@ export default function ShareCardModal({
       ctx.font = '500 24px sans-serif';
       ctx.fillText(sessionFocus, 120, 810);
 
+      // Workout session duration on the right
+      const durationMin = cardioDetails?.workoutDuration 
+        ? Math.max(1, Math.round(cardioDetails.workoutDuration / 60)) 
+        : 0;
+      if (durationMin > 0) {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.font = 'bold 18px "Courier New", Courier, monospace';
+        setLetterSpacing('2px');
+        ctx.fillText(`${durationMin} ${durationMin === 1 ? 'MIN' : 'MINS'} SESSION`, 960, 810);
+        setLetterSpacing('0px');
+        ctx.textAlign = 'left'; // Reset
+      }
+
       // Large Stats Grid Box
       ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
       ctx.fillRect(120, 860, 840, 240);
@@ -308,35 +323,45 @@ export default function ShareCardModal({
       ctx.fillText('GROWTH REPS', 720, 1040);
 
       // Technical Strength indicators row
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.01)';
-      ctx.fillRect(120, 1130, 840, 110);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      ctx.fillRect(120, 1130, 840, 130);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.strokeRect(120, 1130, 840, 110);
+      ctx.strokeRect(120, 1130, 840, 130);
 
       ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = '14px "Courier New", Courier, monospace';
-      ctx.fillText('TOTAL SETS:', 150, 1190);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.fillText(`${totalSets} completed`, 260, 1190);
+      setLetterSpacing('2px');
 
+      // Column 1: Total Sets
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = '14px "Courier New", Courier, monospace';
-      ctx.fillText('DIFFICULTY (RPE):', 450, 1190);
+      ctx.font = '16px "Courier New", Courier, monospace';
+      ctx.fillText('TOTAL SETS', 160, 1175);
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.fillText(`${avgRpe}/10`, 530, 1190);
+      ctx.font = 'bold 24px sans-serif';
+      setLetterSpacing('0px');
+      ctx.fillText(`${totalSets} COMPLETED`, 160, 1220);
 
+      // Column 2: Avg Difficulty
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = '14px "Courier New", Courier, monospace';
-      ctx.fillText('EST MAX LIFT:', 670, 1190);
+      ctx.font = '16px "Courier New", Courier, monospace';
+      setLetterSpacing('2px');
+      ctx.fillText('DIFFICULTY', 440, 1175);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 24px sans-serif';
+      setLetterSpacing('0px');
+      ctx.fillText(`${avgRpe}/10 RPE`, 440, 1220);
+
+      // Column 3: Est Max Lift
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '16px "Courier New", Courier, monospace';
+      setLetterSpacing('2px');
+      ctx.fillText('EST MAX LIFT', 680, 1175);
       ctx.fillStyle = '#34D399'; // Emerald
-      ctx.font = 'bold 20px sans-serif';
+      ctx.font = 'bold 24px sans-serif';
+      setLetterSpacing('0px');
       const oneRmText = topLiftWeight > 0 
-        ? `${displayWeight(topLift1RMEst)} on ${topLiftName.slice(0, 10)}...` 
-        : '0 kg';
-      ctx.fillText(oneRmText, 750, 1190);
+        ? `${displayWeight(topLift1RMEst)} (${topLiftName.slice(0, 12)})` 
+        : '0 KG';
+      ctx.fillText(oneRmText, 680, 1220);
 
       // Detailed exercises printout console
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
@@ -751,8 +776,11 @@ export default function ShareCardModal({
               
               <div className="flex justify-between items-center bg-white/[0.01] border border-white/5 rounded p-1 text-[6px] text-zinc-400 font-mono">
                 <span>Sets: {totalSets}</span>
+                {cardioDetails?.workoutDuration && (
+                  <span>Time: {Math.max(1, Math.round(cardioDetails.workoutDuration / 60))}m</span>
+                )}
                 <span>Avg RPE: {avgRpe}</span>
-                {topLiftWeight > 0 && <span className="text-emerald-400">Max Lift: {displayWeight(topLift1RMEst)}</span>}
+                {topLiftWeight > 0 && <span className="text-emerald-400">Max: {displayWeight(topLift1RMEst)}</span>}
               </div>
 
               {/* LISS finisher preview */}
