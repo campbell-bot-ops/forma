@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, UserSession } from '@/utils/db';
+import { db } from '@/utils/db';
+import { UserSession } from '@/types/workout';
 import { Mail, Lock, ShieldAlert, CheckCircle2, ArrowRight, User, Dumbbell, Ruler, Percent } from 'lucide-react';
 import Image from 'next/image';
 

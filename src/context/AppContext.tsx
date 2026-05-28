@@ -52,18 +52,21 @@ interface AppContextType {
   isSyncing: boolean;
   hapticEnabled: boolean;
   toggleHaptic: () => void;
+  toast: string | null;
+  showToast: (msg: string) => void;
   
   // Handlers
   startWorkout: (session: WorkoutSession) => void;
   completeCnsSurvey: (score: number, scale: number) => void;
   updateWeight: (exerciseId: string, newWeight: number) => Promise<void>;
-  finishWorkout: (logs: any, duration?: number) => Promise<void>;
+  finishWorkout: (logs: any, duration?: number, notes?: string, tags?: string[]) => Promise<void>;
   logRecovery: (logs: any) => Promise<void>;
   logRest: (logs: any) => Promise<void>;
   completeFinisher: (cardioStats?: any) => Promise<void>;
   loginSuccess: (session: UserSession) => Promise<void>;
   signOut: () => Promise<void>;
   resetData: () => Promise<void>;
+  deleteWorkout: (date: string, sessionId: string, id?: string) => Promise<void>;
   triggerHaptic: (pattern: number[]) => void;
 }
 
@@ -97,6 +100,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   
   const [recentCompletedWorkout, setRecentCompletedWorkout] = useState<CompletedWorkout | null>(null);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
   const [shareData, setShareData] = useState<any | null>(null);
 
   const [cnsSurveyOpen, setCnsSurveyOpen] = useState(false);
@@ -133,6 +148,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const storedHaptic = localStorage.getItem('forma_setting_haptic');
       if (storedHaptic !== null) {
         setHapticEnabled(storedHaptic === 'true');
+      }
+
+      // Prune old water logs (older than 30 days) to prevent localStorage pollution
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('forma_water_intake_')) {
+            const dateStr = key.replace('forma_water_intake_', '');
+            const dateVal = Date.parse(dateStr);
+            if (!isNaN(dateVal)) {
+              const diffTime = Date.now() - dateVal;
+              const diffDays = diffTime / (1000 * 60 * 60 * 24);
+              if (diffDays > 30) {
+                localStorage.removeItem(key);
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('FORMA: Failed to clean up old water logs:', e);
       }
 
       return () => {
@@ -337,16 +371,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const finishWorkout = async (logs: any, duration?: number) => {
+  const finishWorkout = async (logs: any, duration?: number, notes?: string, tags?: string[]) => {
     if (!activeSession) return;
 
     let actualTonnage = 0;
+    let completedSetsCount = 0;
     Object.keys(logs).forEach(exId => {
       const sets = logs[exId];
       sets.forEach((s: any) => {
-        actualTonnage += (s.weight || 0) * (s.reps || 0);
+        if (!s.isWarmup) {
+          actualTonnage += (s.weight || 0) * (s.reps || 0);
+          completedSetsCount++;
+        }
       });
     });
+
+    const totalSetsCount = activeSession.exercises
+      ? activeSession.exercises.reduce((total, ex) => total + (ex.defaultSets || 0), 0)
+      : 0;
 
     const completedWorkout: CompletedWorkout = {
       sessionId: activeSession.id,
@@ -355,6 +397,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       date: new Date().toISOString(),
       actualTonnage: actualTonnage,
       logs: logs,
+      completedSetsCount,
+      totalSetsCount,
+      notes: notes || undefined,
+      tags: tags || undefined,
       cnsScore: cnsScore,
       cardioDetails: duration ? { workoutDuration: duration } : undefined
     };
@@ -394,6 +440,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     
     setActiveRecoverySession(null);
     setActiveTab('archive');
+    showToast('Active recovery logged!');
 
     setShareData({
       sessionTitle: completedRecovery.sessionTitle,
@@ -433,6 +480,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     
     setActiveRestSession(null);
     setActiveTab('archive');
+    showToast('Rest day logged!');
   };
 
   const completeFinisher = async (cardioStats?: any) => {
@@ -460,6 +508,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       });
       setShareModalOpen(true);
+      showToast('Workout logged successfully!');
     }
   };
 
@@ -493,6 +542,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAutoOverloadEnabled(true);
     
     setActiveTab('horizon');
+  };
+
+  const deleteWorkout = async (date: string, sessionId: string, id?: string) => {
+    const updatedHistory = await db.deleteWorkout(date, sessionId, id);
+    setWorkoutHistory(updatedHistory);
   };
 
   const updateProfile = async (profile: UserProfile) => {
@@ -585,7 +639,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         loginSuccess,
         signOut,
         resetData,
-        triggerHaptic
+        deleteWorkout,
+        triggerHaptic,
+        toast,
+        showToast
       }}
     >
       {children}

@@ -3,14 +3,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WorkoutSession, Exercise, LoggedSet } from '@/constants/workout';
-import { ArrowLeft, Check, Timer, ArrowRight, Zap, RefreshCw, CheckCircle2, Dumbbell, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, Check, Timer, ArrowRight, Zap, RefreshCw, CheckCircle2, Dumbbell, Minus, Plus, Flame } from 'lucide-react';
 import ExerciseHistoryModal from '@/components/ExerciseHistoryModal';
 import { useApp } from '@/context/AppContext';
 
 interface CrucibleViewProps {
   session: WorkoutSession;
   onBack: () => void;
-  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }, duration: number) => void;
+  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }, duration: number, notes?: string, tags?: string[]) => void;
   zeroUiEnabled: boolean;
   autoOverloadEnabled: boolean;
   onUpdateWeight: (exerciseId: string, newWeight: number) => void;
@@ -89,10 +89,13 @@ export default function CrucibleView({
   // Confirmation states
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [isWarmup, setIsWarmup] = useState(false);
 
   // Timer state
   const [timerActive, setTimerActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(90);
+  const [restDuration, setRestDuration] = useState(90);
+  const [customRestTimes, setCustomRestTimes] = useState<Record<string, number>>({});
 
   // Global elapsed workout timer state
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -105,6 +108,10 @@ export default function CrucibleView({
 
   // Plate Calculator state
   const [showPlateCalc, setShowPlateCalc] = useState(false);
+
+  // Workout Notes & Tags states
+  const [workoutNotes, setWorkoutNotes] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // Zero-UI Input Prediction sync
   useEffect(() => {
@@ -157,7 +164,8 @@ export default function CrucibleView({
             setTimerActive(false);
             triggerHaptic([30, 50, 30]); // double vibrate on rest timer completion
             advanceWorkflowRef.current();
-            return 90;
+            const nextDefault = currentExercise.keyMovement ? 180 : 90;
+            return customRestTimes[currentExercise.id] || nextDefault;
           }
           return prev - 1;
         });
@@ -167,7 +175,7 @@ export default function CrucibleView({
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [timerActive]);
+  }, [timerActive, currentExercise, customRestTimes]);
 
   // Global elapsed workout timer effect
   useEffect(() => {
@@ -186,15 +194,17 @@ export default function CrucibleView({
     
     // Check Progressive Overload achievement
     let achievedOverload = false;
-    if (prevBestSet) {
-      if (
-        weightInKg > prevBestSet.weight + 0.1 ||
-        (Math.abs(weightInKg - prevBestSet.weight) <= 0.15 && parsedReps > prevBestSet.reps)
-      ) {
-        achievedOverload = true;
+    if (!isWarmup) {
+      if (prevBestSet) {
+        if (
+          weightInKg > prevBestSet.weight + 0.1 ||
+          (Math.abs(weightInKg - prevBestSet.weight) <= 0.15 && parsedReps > prevBestSet.reps)
+        ) {
+          achievedOverload = true;
+        }
+      } else if (parsedReps > 0 && parsedInputWeight > 0) {
+        achievedOverload = true; // First time logging split counts as overload progress
       }
-    } else if (parsedReps > 0 && parsedInputWeight > 0) {
-      achievedOverload = true; // First time logging split counts as overload progress
     }
 
     if (achievedOverload) {
@@ -205,11 +215,14 @@ export default function CrucibleView({
       triggerHaptic([40]); // standard vibrate on regular set log
     }
 
+    const warmupCount = (workoutLogs[currentExercise.id] || []).filter(s => s.isWarmup).length;
+
     const newSet: LoggedSet = {
-      setNumber: currentSetIdx + 1,
+      setNumber: isWarmup ? -(warmupCount + 1) : currentSetIdx + 1,
       weight: parseFloat(weightInKg.toFixed(1)),
       reps: parsedReps,
-      rpe: rpe
+      rpe: isWarmup ? 6 : rpe,
+      isWarmup: isWarmup
     };
     
     const updatedSets = [...(workoutLogs[currentExercise.id] || []), newSet];
@@ -218,31 +231,93 @@ export default function CrucibleView({
       [currentExercise.id]: updatedSets
     }));
 
-    // Auto-Regulated Overload Trigger Check (run only on last set, average RPE across all sets)
-    if (currentSetIdx === totalSets - 1 && autoOverloadEnabled && cnsScale >= 1.0) {
-      const totalRpe = updatedSets.reduce((sum, s) => sum + s.rpe, 0);
-      const avgRpe = totalRpe / updatedSets.length;
-      
-      const targetsMet = updatedSets.every((s, idx) => {
-        const targetReps = currentExercise.ghostSets[idx]?.reps || currentExercise.ghostSets[currentExercise.ghostSets.length - 1].reps;
-        return s.reps >= targetReps;
-      });
+    if (isWarmup) {
+      // Warmup logged - reset inputs to ghostSet target working values for next set
+      const targetW = ghostSet.weight;
+      setWeight(units === 'imperial' ? (targetW * 2.20462).toFixed(1) : targetW.toFixed(1));
+      setReps(ghostSet.reps.toString());
+      setIsWarmup(false);
+      return;
+    }
 
-      if (targetsMet && avgRpe <= 7) {
-        const nextWeight = weightInKg + 2.5;
-        onUpdateWeight(currentExercise.id, parseFloat(nextWeight.toFixed(1)));
-        const overloadWeightDisplay = units === 'imperial' 
-          ? `${(nextWeight * 2.20462).toFixed(1)} lbs` 
-          : `${nextWeight.toFixed(1)} kg`;
-        setOverloadNotice(`Auto-Overload Triggered! Avg RPE: ${avgRpe.toFixed(1)}. Next week baseline updated to ${overloadWeightDisplay}.`);
-        triggerHaptic([30, 50, 30]);
-        setTimeout(() => setOverloadNotice(null), 4500);
+    // Auto-Regulated Overload Trigger Check (run only on last set)
+    if (currentSetIdx === totalSets - 1 && autoOverloadEnabled && cnsScale >= 1.0) {
+      // Find all past workouts logging this exercise to verify minimum history of 2 workouts
+      const pastLogsWithExercise = workoutHistory.filter(
+        h => h.logs && h.logs[currentExercise.id] && Array.isArray(h.logs[currentExercise.id]) && h.logs[currentExercise.id].length > 0
+      );
+
+      if (pastLogsWithExercise.length >= 2) {
+        const workingUpdatedSets = updatedSets.filter(s => !s.isWarmup);
+        // Targets met in current session
+        const currentTargetsMet = workingUpdatedSets.every((s, idx) => {
+          const targetReps = currentExercise.ghostSets[idx]?.reps || currentExercise.ghostSets[currentExercise.ghostSets.length - 1].reps;
+          return s.reps >= targetReps;
+        });
+
+        if (currentTargetsMet) {
+          // Compute rolling average RPE (current session + up to 2 past sessions)
+          const currentAvgRpe = workingUpdatedSets.reduce((sum, s) => sum + s.rpe, 0) / workingUpdatedSets.length;
+          let rpeSum = currentAvgRpe;
+          let sessionsCount = 1;
+
+          pastLogsWithExercise.slice(0, 2).forEach(log => {
+            const sets = log.logs[currentExercise.id];
+            const avgRpe = sets.reduce((sum: number, s: any) => sum + (s.rpe || 8), 0) / sets.length;
+            rpeSum += avgRpe;
+            sessionsCount++;
+          });
+
+          const rollingAvgRpe = rpeSum / sessionsCount;
+          const rpeThreshold = currentExercise.keyMovement ? 7.5 : 7.0;
+
+          if (rollingAvgRpe <= rpeThreshold) {
+            // Determine increment: key movement gets 2.5kg / 5lbs; isolation gets 1.25kg / 2.5lbs
+            let incrementKg = 2.5;
+            if (units === 'imperial') {
+              incrementKg = currentExercise.keyMovement ? (5 / 2.20462) : (2.5 / 2.20462);
+            } else {
+              incrementKg = currentExercise.keyMovement ? 2.5 : 1.25;
+            }
+
+            const nextWeight = weightInKg + incrementKg;
+            onUpdateWeight(currentExercise.id, parseFloat(nextWeight.toFixed(1)));
+
+            const overloadWeightDisplay = units === 'imperial'
+              ? `${(nextWeight * 2.20462).toFixed(1)} lbs`
+              : `${nextWeight.toFixed(1)} kg`;
+
+            setOverloadNotice(
+              `Auto-Overload Triggered! Rolling Avg RPE: ${rollingAvgRpe.toFixed(1)}. Next week baseline updated to ${overloadWeightDisplay}.`
+            );
+            triggerHaptic([30, 50, 30]);
+            setTimeout(() => setOverloadNotice(null), 4500);
+          }
+        }
       }
     }
 
-    // Enter Rest Timer
-    setTimeLeft(90);
+    // Enter Rest Timer based on exercise type and preferences
+    const defaultDuration = currentExercise.keyMovement ? 180 : 90;
+    const preferredDuration = customRestTimes[currentExercise.id] || defaultDuration;
+    setRestDuration(preferredDuration);
+    setTimeLeft(preferredDuration);
     setTimerActive(true);
+  };
+
+  const adjustRestTime = (amount: number) => {
+    setTimeLeft(prev => {
+      const newTime = Math.max(10, Math.min(300, prev + amount));
+      setRestDuration(currDuration => {
+        const updated = Math.max(10, Math.min(300, currDuration + amount));
+        setCustomRestTimes(prevMap => ({
+          ...prevMap,
+          [currentExercise.id]: updated
+        }));
+        return updated;
+      });
+      return newTime;
+    });
   };
 
   const handleNavigateToExercise = (index: number) => {
@@ -276,7 +351,7 @@ export default function CrucibleView({
     return parts.join(':');
   };
 
-  const strokeDashoffset = 502.6 - (502.6 * (90 - timeLeft)) / 90;
+  const strokeDashoffset = 502.6 - (502.6 * (restDuration - timeLeft)) / restDuration;
 
   // Slide variant configurations
   const slideVariants = {
@@ -372,7 +447,8 @@ export default function CrucibleView({
       {/* Exercise Plan Checklist / Overview Slider */}
       <div className="flex gap-2 pb-3 mb-4 overflow-x-auto no-scrollbar border-b border-white/5 relative z-10">
         {session.exercises.map((ex, idx) => {
-          const isCompleted = (workoutLogs[ex.id]?.length || 0) >= ex.defaultSets;
+          const workingSetsCount = (workoutLogs[ex.id] || []).filter(s => !s.isWarmup).length;
+          const isCompleted = workingSetsCount >= ex.defaultSets;
           const isActive = idx === currentExerciseIdx;
           
           return (
@@ -474,10 +550,30 @@ export default function CrucibleView({
                   Target Reps: <span className="text-white">{currentExercise.targetRepsRange}</span> &bull; Plan: <span className="text-white">{totalSets} Sets</span>
                 </p>
 
+                {/* Logged Warm-ups List */}
+                {(() => {
+                  const warmups = (workoutLogs[currentExercise.id] || []).filter(s => s.isWarmup);
+                  if (warmups.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-1 mb-3.5 items-center justify-start">
+                      <span className="text-[8px] font-extrabold text-amber-500 uppercase tracking-widest mr-1">Logged Warm-ups:</span>
+                      {warmups.map((w, idx) => {
+                        const displayW = units === 'imperial' ? Math.round(w.weight * 2.20462) : w.weight;
+                        const unitLabel = units === 'imperial' ? 'lbs' : 'kg';
+                        return (
+                          <span key={idx} className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] font-semibold text-amber-400 font-mono">
+                            {displayW}{unitLabel} x {w.reps}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 {/* Progress Indicators */}
                 <div className="flex gap-2 mb-2">
                   {Array.from({ length: totalSets }).map((_, i) => {
-                    const loggedSet = workoutLogs[currentExercise.id]?.[i];
+                    const loggedSet = (workoutLogs[currentExercise.id] || []).filter(s => !s.isWarmup)[i];
                     return (
                       <div
                         key={i}
@@ -502,7 +598,7 @@ export default function CrucibleView({
                 <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
                   <span>Set {currentSetIdx + 1} of {totalSets}</span>
                   <span className="font-semibold text-zinc-400">
-                    Target Setup: {ghostSet.weight}kg x {ghostSet.reps} @ RPE {ghostSet.rpe}
+                    Target Setup: {units === 'imperial' ? `${(ghostSet.weight * 2.20462).toFixed(1)} lbs` : `${ghostSet.weight} kg`} x {ghostSet.reps} @ RPE {ghostSet.rpe}
                   </span>
                 </div>
               </div>
@@ -676,6 +772,69 @@ export default function CrucibleView({
                     </div>
                   </div>
 
+                  {/* Warmup Set Toggle */}
+                  <div className="flex justify-between items-center bg-white/[0.02] border border-white/5 rounded-xl p-3.5 my-1">
+                    <div className="flex items-center gap-2">
+                      <Flame size={14} className={isWarmup ? "text-amber-500 animate-pulse" : "text-zinc-500"} />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[10px] font-bold text-white uppercase tracking-wider">Warm-up Set</span>
+                        <span className="text-[8px] text-zinc-500 font-medium leading-normal">Excludes set from volume stats & overload checks</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsWarmup(!isWarmup)}
+                      className={`w-9 h-5 rounded-full p-0.5 transition-all duration-300 relative cursor-pointer ${
+                        isWarmup ? "bg-amber-500" : "bg-zinc-800"
+                      }`}
+                    >
+                      <motion.div
+                        layout
+                        className="w-4 h-4 rounded-full bg-white shadow-md"
+                        animate={{ x: isWarmup ? 16 : 0 }}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Warmup Suggestions pyramid */}
+                  {isWarmup && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="glass-panel border-amber-950/20 bg-amber-950/5 rounded-xl p-3 flex flex-col gap-2 text-left"
+                    >
+                      <span className="text-[8px] font-bold text-amber-500 uppercase tracking-widest font-mono">
+                        Warm-up Pyramid Suggestions:
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { pct: 0.5, reps: 8, label: '50% (8 reps)' },
+                          { pct: 0.7, reps: 5, label: '70% (5 reps)' },
+                          { pct: 0.85, reps: 3, label: '85% (3 reps)' }
+                        ].map((item, idx) => {
+                          const wKg = ghostSet.weight * item.pct;
+                          const w = units === 'imperial' ? wKg * 2.20462 : wKg;
+                          const step = units === 'imperial' ? 2.5 : 1.25;
+                          const sugW = (Math.round(w / step) * step).toFixed(1);
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setWeight(sugW);
+                                setReps(item.reps.toString());
+                              }}
+                              className="px-2 py-1.5 rounded-lg border border-amber-900/30 bg-amber-950/20 hover:bg-amber-950/40 text-[9px] font-bold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer text-center"
+                            >
+                              <div className="font-mono font-extrabold">{sugW} {units === 'imperial' ? 'lbs' : 'kg'}</div>
+                              <div className="text-[7px] text-amber-500 font-semibold mt-0.5">{item.label}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+
                   {/* Confirm button */}
                   <motion.button
                     whileHover={{ scale: 1.01 }}
@@ -696,8 +855,8 @@ export default function CrucibleView({
                 >
                   <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent animate-pulse" />
                   
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5 w-full sm:w-auto">
                       <div className="relative flex items-center justify-center w-14 h-14 flex-shrink-0">
                         <svg className="w-full h-full transform -rotate-90">
                           <circle
@@ -714,7 +873,7 @@ export default function CrucibleView({
                             className="stroke-emerald-400 fill-transparent"
                             strokeWidth="3.5"
                             strokeDasharray="150.8"
-                            strokeDashoffset={150.8 - (150.8 * (90 - timeLeft)) / 90}
+                            strokeDashoffset={150.8 - (150.8 * (restDuration - timeLeft)) / restDuration}
                             strokeLinecap="round"
                             style={{ transition: 'stroke-dashoffset 1s linear' }}
                           />
@@ -734,16 +893,22 @@ export default function CrucibleView({
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 w-full sm:w-auto justify-end">
                       <button
-                        onClick={() => setTimeLeft(prev => Math.min(300, prev + 30))}
-                        className="px-3 py-2 border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-xl text-zinc-300 transition-all cursor-pointer font-mono"
+                        onClick={() => adjustRestTime(-30)}
+                        className="flex-1 sm:flex-none px-3 py-2.5 sm:py-2 border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-xl text-zinc-300 transition-all cursor-pointer font-mono text-center"
+                      >
+                        -30s
+                      </button>
+                      <button
+                        onClick={() => adjustRestTime(30)}
+                        className="flex-1 sm:flex-none px-3 py-2.5 sm:py-2 border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-wider rounded-xl text-zinc-300 transition-all cursor-pointer font-mono text-center"
                       >
                         +30s
                       </button>
                       <button
                         onClick={skipTimer}
-                        className="px-4 py-2 bg-white hover:bg-zinc-200 text-black text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                        className="flex-1 sm:flex-none px-4 py-2.5 sm:py-2 bg-white hover:bg-zinc-200 text-black text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center font-bold"
                       >
                         Skip
                       </button>
@@ -829,13 +994,58 @@ export default function CrucibleView({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="glass-panel border-white/10 bg-obsidian rounded-3xl p-6 max-w-sm w-full text-center relative z-50 shadow-2xl"
+              className="glass-panel border-white/10 bg-[#0f0f11] rounded-[28px] p-6 max-w-md w-full text-left relative z-50 shadow-2xl flex flex-col gap-4"
             >
-              <h3 className="text-lg font-bold text-white mb-2">Finalize & Log Workout?</h3>
-              <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
-                Ready to seal this training session? Your completed sets and volume tonnage will be saved to your ledger.
-              </p>
-              <div className="flex gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-1">Finalize & Log Workout</h3>
+                <p className="text-[10px] text-zinc-400 leading-normal">
+                  Ready to seal this training session? Add any notes or tags below.
+                </p>
+              </div>
+
+              {/* Workout Notes */}
+              <div className="flex flex-col gap-1.5 w-full">
+                <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold font-mono">
+                  Workout Notes
+                </label>
+                <textarea
+                  value={workoutNotes}
+                  onChange={(e) => setWorkoutNotes(e.target.value)}
+                  placeholder="How did you feel? Left shoulder tight, high energy..."
+                  className="w-full bg-black/30 border border-white/5 focus:border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none resize-none h-16 font-sans leading-relaxed transition-colors"
+                />
+              </div>
+
+              {/* Workout Tags */}
+              <div className="flex flex-col gap-1.5 w-full">
+                <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold font-mono">
+                  Session Tags
+                </label>
+                <div className="flex flex-wrap gap-1">
+                  {['Heavy Load', 'High Volume', 'Great Pump', 'Stiff Joints', 'Low Energy', 'Focus Peak'].map(tag => {
+                    const isSelected = selectedTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        onClick={() => {
+                          setSelectedTags(prev => 
+                            isSelected ? prev.filter(t => t !== tag) : [...prev, tag]
+                          );
+                        }}
+                        className={`px-2 py-0.5 text-[8px] font-extrabold uppercase rounded-md border transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-cyan-950/40 text-cyan-400 border-cyan-800/40' 
+                            : 'bg-white/5 text-zinc-500 border-white/5 hover:border-white/10 hover:text-zinc-300'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-2">
                 <button
                   onClick={() => setShowEndConfirm(false)}
                   className="flex-1 py-3 border border-white/5 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
@@ -845,7 +1055,7 @@ export default function CrucibleView({
                 <button
                   onClick={() => {
                     setShowEndConfirm(false);
-                    onFinishWorkout(workoutLogs, elapsedTime);
+                    onFinishWorkout(workoutLogs, elapsedTime, workoutNotes, selectedTags);
                   }}
                   className="flex-1 py-3 bg-white hover:bg-zinc-200 text-black text-xs font-bold rounded-xl transition-all cursor-pointer active-glow"
                 >

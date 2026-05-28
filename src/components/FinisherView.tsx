@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Timer, Play, Pause, CheckCircle, Award } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
+import { computeTotalTonnage } from '@/constants/workout';
 import ConfettiCanvas from '@/components/ConfettiCanvas';
 
 interface FinisherViewProps {
@@ -84,6 +85,8 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
   const totalDuration = 30 * 60; // 30 minutes
   const [secondsLeft, setSecondsLeft] = useState(totalDuration);
   const [isPaused, setIsPaused] = useState(false);
+  const [speedMph, setSpeedMph] = useState(3.0);
+  const [incline, setIncline] = useState(12); // in percent
 
   // Completion states
   const [isCompleteView, setIsCompleteView] = useState(false);
@@ -134,13 +137,15 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
 
   // Real-time ACSM treadmill math
   const elapsedSeconds = totalDuration - secondsLeft;
-  const speedMph = 3.0;
   const speedDisplay = units === 'imperial' ? speedMph : speedMph * 1.60934;
   
   const distanceMiles = speedMph * (elapsedSeconds / 3600);
   const distanceDisplay = units === 'imperial' ? distanceMiles : distanceMiles * 1.60934;
 
-  const metValue = 8.26;
+  // Dynamic MET based on speed (m/min) and grade
+  const speed_m_min = speedMph * 26.8224;
+  const grade = incline / 100;
+  const metValue = (0.1 * speed_m_min + 1.8 * speed_m_min * grade + 3.5) / 3.5;
   const caloriesBurned = ((metValue * 3.5 * weight) / 200) * (elapsedSeconds / 60);
 
   const handleComplete = () => {
@@ -149,7 +154,7 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
       distance: parseFloat(distanceDisplay.toFixed(2)),
       calories: Math.round(caloriesBurned),
       speed: parseFloat(speedDisplay.toFixed(1)),
-      incline: 12,
+      incline: incline,
       units: units
     });
   };
@@ -159,7 +164,7 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
   const isImperial = units === 'imperial';
 
   // Tonnage calculation
-  const rawTargetTonnage = sessionObj?.totalTonnage || 4000;
+  const rawTargetTonnage = sessionObj ? computeTotalTonnage(sessionObj) : 4000;
   const rawActualTonnage = recentCompletedWorkout?.actualTonnage || 0;
   
   const displayTargetTonnage = isImperial ? Math.round(rawTargetTonnage * 2.20462) : rawTargetTonnage;
@@ -389,33 +394,57 @@ export default function FinisherView({ onComplete, weight, units }: FinisherView
         </div>
 
         {/* LISS Live Stats Card */}
-        <div className="mt-8 glass-panel border-blue-900/30 bg-blue-950/10 rounded-2xl p-4 w-full flex justify-around text-center max-w-[340px]">
+        <div className="mt-8 glass-panel border-blue-900/30 bg-blue-950/10 rounded-2xl p-4 w-full flex justify-around text-center max-w-[340px] items-center">
           <div>
             <span className="text-[9px] uppercase text-zinc-500 tracking-wider font-bold block mb-1">Incline</span>
-            <p className="text-sm font-bold text-white font-mono">12%</p>
+            <div className="flex items-center justify-center gap-1.5 mt-0.5">
+              <button 
+                onClick={() => setIncline(prev => Math.max(0, prev - 1))}
+                className="w-4 h-4 rounded bg-white/5 hover:bg-white/10 text-white flex items-center justify-center text-[10px] font-bold border border-white/5 cursor-pointer transition-colors"
+              >-</button>
+              <span className="text-sm font-bold text-white font-mono leading-none">{incline}%</span>
+              <button 
+                onClick={() => setIncline(prev => Math.min(20, prev + 1))}
+                className="w-4 h-4 rounded bg-white/5 hover:bg-white/10 text-white flex items-center justify-center text-[10px] font-bold border border-white/5 cursor-pointer transition-colors"
+              >+</button>
+            </div>
           </div>
-          <div className="w-[1px] bg-white/5" />
+          <div className="w-[1px] h-8 bg-white/5" />
           <div>
             <span className="text-[9px] uppercase text-zinc-500 tracking-wider font-bold block mb-1">Speed</span>
-            <p className="text-sm font-bold text-white font-mono">
-              {speedDisplay.toFixed(1)} <span className="text-[8px] text-zinc-400">{units === 'imperial' ? 'mph' : 'km/h'}</span>
-            </p>
+            <div className="flex items-center justify-center gap-1.5 mt-0.5">
+              <button 
+                onClick={() => setSpeedMph(prev => Math.max(1.0, parseFloat((prev - 0.1).toFixed(1))))}
+                className="w-4 h-4 rounded bg-white/5 hover:bg-white/10 text-white flex items-center justify-center text-[10px] font-bold border border-white/5 cursor-pointer transition-colors"
+              >-</button>
+              <span className="text-sm font-bold text-white font-mono leading-none">{speedDisplay.toFixed(1)}</span>
+              <button 
+                onClick={() => setSpeedMph(prev => Math.min(10.0, parseFloat((prev + 0.1).toFixed(1))))}
+                className="w-4 h-4 rounded bg-white/5 hover:bg-white/10 text-white flex items-center justify-center text-[10px] font-bold border border-white/5 cursor-pointer transition-colors"
+              >+</button>
+            </div>
+            <span className="text-[7px] text-zinc-500 font-mono block mt-0.5 uppercase tracking-wider">{units === 'imperial' ? 'mph' : 'km/h'}</span>
           </div>
-          <div className="w-[1px] bg-white/5" />
+          <div className="w-[1px] h-8 bg-white/5" />
           <div>
             <span className="text-[9px] uppercase text-zinc-500 tracking-wider font-bold block mb-1">Distance</span>
-            <p className="text-sm font-bold text-white font-mono">
-              {distanceDisplay.toFixed(2)} <span className="text-[8px] text-zinc-400">{units === 'imperial' ? 'mi' : 'km'}</span>
+            <p className="text-sm font-bold text-white font-mono mt-0.5">
+              {distanceDisplay.toFixed(2)}
             </p>
+            <span className="text-[7px] text-zinc-500 font-mono block mt-0.5 uppercase tracking-wider">{units === 'imperial' ? 'mi' : 'km'}</span>
           </div>
-          <div className="w-[1px] bg-white/5" />
+          <div className="w-[1px] h-8 bg-white/5" />
           <div>
             <span className="text-[9px] uppercase text-zinc-500 tracking-wider font-bold block mb-1">Burn</span>
-            <p className="text-sm font-bold text-emerald-400 font-mono">
-              {Math.round(caloriesBurned)} <span className="text-[8px] text-zinc-400">kcal</span>
+            <p className="text-sm font-bold text-emerald-400 font-mono mt-0.5">
+              {Math.round(caloriesBurned)}
             </p>
+            <span className="text-[7px] text-zinc-500 font-mono block mt-0.5 uppercase tracking-wider">kcal</span>
           </div>
         </div>
+        <p className="text-[8px] text-zinc-500 font-bold tracking-widest mt-2.5 text-center uppercase opacity-60">
+          * Calorie calculations are estimated based on dynamic ACSM MET formulas *
+        </p>
       </div>
 
       {/* Rhythmic Waveform and Actions Footer */}

@@ -27,18 +27,25 @@ export default function CnsSurveyModal({ isOpen, onClose, onComplete }: CnsSurve
   let icon = <ShieldCheck className="text-emerald-400 animate-pulse" size={24} />;
 
   if (score < 50) {
-    status = 'FATIGUED (10% DELOAD)';
-    scale = 0.9;
+    status = 'FATIGUED (15% DELOAD)';
+    scale = 0.85;
     statusColor = 'text-red-400';
     statusBg = 'bg-red-950/20 border-red-900/30';
-    desc = 'High fatigue detected. Today\'s target weights will be automatically reduced by 10% to prevent overtraining.';
+    desc = "High fatigue detected. Today's target weights will be automatically reduced by 15% to prevent overtraining.";
     icon = <AlertTriangle className="text-red-400 animate-bounce" size={24} />;
+  } else if (score < 60) {
+    status = 'TIRED (10% DELOAD)';
+    scale = 0.90;
+    statusColor = 'text-orange-400';
+    statusBg = 'bg-orange-950/20 border-orange-900/30';
+    desc = 'Noticeable fatigue. Target weights are reduced by 10% to ensure safe and sustainable recovery.';
+    icon = <AlertTriangle className="text-orange-400" size={24} />;
   } else if (score < 75) {
-    status = 'MODERATE FATIGUE';
-    scale = 1.0;
+    status = 'MODERATE FATIGUE (5% DELOAD)';
+    scale = 0.95;
     statusColor = 'text-amber-400';
     statusBg = 'bg-amber-950/20 border-amber-900/30';
-    desc = 'Moderate fatigue. Train at normal weights today, but listen to your body and adjust intensity.';
+    desc = 'Moderate fatigue. Target weights are reduced by 5% to support recovery while maintaining performance.';
     icon = <Activity className="text-amber-400" size={24} />;
   }
 

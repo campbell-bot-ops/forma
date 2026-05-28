@@ -2,8 +2,7 @@ const CACHE_NAME = 'forma-cache-v1';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
-  '/Frame 166.png',
-  '/icon.png'
+  '/Frame 166.png'
 ];
 
 self.addEventListener('install', (event) => {

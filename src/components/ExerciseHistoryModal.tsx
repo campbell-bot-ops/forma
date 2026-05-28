@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, TrendingUp, Dumbbell, Calendar } from 'lucide-react';
-import { LoggedSet } from '@/constants/workout';
+import { LoggedSet, computeEstimated1RM } from '@/constants/workout';
 
 interface ExerciseHistoryModalProps {
   isOpen: boolean;
@@ -44,7 +44,7 @@ export default function ExerciseHistoryModal({
       // Calculate max weight and max estimated 1RM for this workout
       const maxWeight = Math.max(...log.sets.map(s => s.weight));
       const maxEst1RM = Math.max(
-        ...log.sets.map(s => (s.reps > 0 ? s.weight / (1.0278 - 0.0278 * s.reps) : 0))
+        ...log.sets.map(s => computeEstimated1RM(s.weight || 0, s.reps || 0))
       );
       
       // Convert weights if units are imperial

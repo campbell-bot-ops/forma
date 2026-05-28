@@ -2,9 +2,9 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { WorkoutSession } from '@/constants/workout';
+import { WorkoutSession, computeTotalTonnage } from '@/constants/workout';
 import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle, Droplet } from 'lucide-react';
-import { UserProfile } from '@/utils/db';
+import { UserProfile } from '@/types/workout';
 import Image from 'next/image';
 import { useApp } from '@/context/AppContext';
 
@@ -40,11 +40,10 @@ const getDayOfYearIndex = () => {
 };
 
 const getStartOfWeek = () => {
-  const today = new Date();
-  const day = today.getDay();
-  const diff = today.getDate() - day + (day === 0 ? -6 : 1);
-  const start = new Date(today.setDate(diff));
-  start.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const start = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0, 0);
   return start;
 };
 
@@ -74,7 +73,34 @@ const exerciseTargets: Record<string, Record<string, number>> = {
   'weighted-russian-twists': { Core: 1.0 }
 };
 
-const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> => {
+/**
+ * Resolve muscle targets for an exercise.
+ * Falls back to parsing the targetGroup string for custom/user-added exercises.
+ */
+const resolveExerciseTargets = (exId: string, sessions: WorkoutSession[]): Record<string, number> | null => {
+  // Check the hardcoded map first
+  if (exerciseTargets[exId]) return exerciseTargets[exId];
+
+  // Fallback: find the exercise in session definitions and parse targetGroup
+  for (const session of sessions) {
+    const ex = session.exercises?.find(e => e.id === exId);
+    if (ex) {
+      const group = ex.targetGroup.toLowerCase();
+      if (group.includes('chest')) return { Chest: 1.0 };
+      if (group.includes('lat') || group.includes('back') || group.includes('rhomboid')) return { Back: 1.0 };
+      if (group.includes('shoulder') || group.includes('delt')) return { Shoulders: 1.0 };
+      if (group.includes('bicep') || group.includes('tricep') || group.includes('arm')) return { Arms: 1.0 };
+      if (group.includes('quad')) return { Quads: 1.0 };
+      if (group.includes('hamstring') || group.includes('glute')) return { Hamstrings: 0.7, Quads: 0.3 };
+      if (group.includes('core') || group.includes('ab') || group.includes('oblique')) return { Core: 1.0 };
+      // Generic fallback — assign to closest match or skip
+      return null;
+    }
+  }
+  return null;
+};
+
+const calculateMuscleRecovery = (workoutHistory: any[], sessions: WorkoutSession[], sleepHours: number = 8.0): Record<string, number> => {
   const muscleFatigue: Record<string, number> = {
     Chest: 0,
     Back: 0,
@@ -85,7 +111,7 @@ const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> 
     Core: 0
   };
 
-  const decayRates: Record<string, number> = {
+  const baseDecayRates: Record<string, number> = {
     Chest: 0.015,       // ~72h
     Back: 0.015,        // ~72h
     Quads: 0.015,       // ~72h
@@ -94,6 +120,13 @@ const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> 
     Arms: 0.025,        // ~40h
     Core: 0.035         // ~24h
   };
+
+  // Modulate decay rates by sleep quality: poor sleep = slower recovery
+  const sleepFactor = sleepHours >= 8 ? 1.0 : sleepHours >= 7 ? 0.9 : sleepHours >= 6 ? 0.75 : 0.6;
+  const decayRates: Record<string, number> = {};
+  Object.keys(baseDecayRates).forEach(muscle => {
+    decayRates[muscle] = baseDecayRates[muscle] * sleepFactor;
+  });
 
   const now = new Date().getTime();
   const sortedHistory = [...workoutHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -112,15 +145,21 @@ const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> 
       });
     }
 
-    // Accumulate the fatigue from the exercises in this log
+    // Accumulate the fatigue from the exercises in this log, weighted by RPE
     if (log.logs) {
       Object.keys(log.logs).forEach(exId => {
-        const setCount = log.logs[exId]?.length || 0;
-        const targets = exerciseTargets[exId];
+        const sets = log.logs[exId];
+        if (!Array.isArray(sets) || sets.length === 0) return;
+
+        const setCount = sets.length;
+        const avgRpe = sets.reduce((sum: number, s: any) => sum + (s.rpe || 8), 0) / setCount;
+        const rpeMultiplier = avgRpe / 8; // normalize around RPE 8 as baseline
+
+        const targets = resolveExerciseTargets(exId, sessions);
         if (targets) {
           Object.keys(targets).forEach(muscle => {
             const factor = targets[muscle];
-            muscleFatigue[muscle] = Math.min(100, (muscleFatigue[muscle] || 0) + setCount * 15 * factor);
+            muscleFatigue[muscle] = Math.min(100, (muscleFatigue[muscle] || 0) + setCount * 15 * factor * rpeMultiplier);
           });
         }
       });
@@ -140,7 +179,7 @@ const calculateMuscleRecovery = (workoutHistory: any[]): Record<string, number> 
 
   const recovery: Record<string, number> = {};
   Object.keys(muscleFatigue).forEach(muscle => {
-    recovery[muscle] = Math.round(100 - muscleFatigue[muscle]);
+    recovery[muscle] = Math.max(0, Math.round(100 - muscleFatigue[muscle]));
   });
 
   return recovery;
@@ -266,7 +305,8 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
         const logDate = new Date(log.date);
         const day = logDate.getDay();
         const diff = logDate.getDate() - day + (day === 0 ? -6 : 1);
-        const startOfWeek = new Date(logDate.setDate(diff));
+        const logDateClone = new Date(logDate.getTime());
+        const startOfWeek = new Date(logDateClone.setDate(diff));
         startOfWeek.setHours(0, 0, 0, 0);
         const weekKey = startOfWeek.toDateString();
         workoutsByWeek.set(weekKey, (workoutsByWeek.get(weekKey) || 0) + 1);
@@ -277,7 +317,8 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
     const today = new Date();
     const todayDay = today.getDay();
     const todayDiff = today.getDate() - todayDay + (todayDay === 0 ? -6 : 1);
-    const currentWeekMonday = new Date(today.setDate(todayDiff));
+    const todayClone = new Date(today.getTime());
+    const currentWeekMonday = new Date(todayClone.setDate(todayDiff));
     currentWeekMonday.setHours(0, 0, 0, 0);
 
     let streak = 0;
@@ -291,7 +332,9 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
     
     // Check previous weeks
     while (true) {
-      checkWeek.setDate(checkWeek.getDate() - 7);
+      const nextCheckWeek = new Date(checkWeek.getTime());
+      nextCheckWeek.setDate(nextCheckWeek.getDate() - 7);
+      checkWeek = nextCheckWeek;
       const weekKey = checkWeek.toDateString();
       const count = workoutsByWeek.get(weekKey) || 0;
       if (count >= 4) {
@@ -310,7 +353,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
     setQuoteIdx((prev) => (prev + 1) % MOTIVATIONAL_QUOTES.length);
   };
 
-  const recovery = calculateMuscleRecovery(workoutHistory);
+  const recovery = calculateMuscleRecovery(workoutHistory, sessions, sleepHours);
 
   const getMuscleColor = (muscleName: string) => {
     const score = recovery[muscleName] !== undefined ? recovery[muscleName] : 100;
@@ -738,7 +781,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                         Target: {waterTarget.toFixed(2)} L
                       </p>
                     </div>
-                    <div className="flex justify-center items-center gap-1.5 sm:gap-4 relative z-10">
+                    <div className="flex justify-center items-center gap-1 sm:gap-4 relative z-10">
                       <button
                         onClick={(e) => { e.stopPropagation(); adjustWater(-0.25); }}
                         className="w-6 h-6 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white-adj cursor-pointer transition-all active:scale-90"
@@ -746,7 +789,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       >
                         <Minus size={10} className="sm:w-[14px] sm:h-[14px]" />
                       </button>
-                      <span className="text-[7px] sm:text-[9px] font-bold font-mono text-zinc-400 uppercase tracking-wider whitespace-nowrap">
+                      <span className="text-[7px] sm:text-[9px] font-bold font-mono text-zinc-400 uppercase tracking-wider whitespace-nowrap px-0.5">
                         250 ml
                       </span>
                       <button
@@ -883,8 +926,8 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                   </span>
                   <span className="text-lg sm:text-xl font-bold text-white font-sans">
                     {todayWorkout?.type === 'workout' 
-                      ? `${todayWorkout?.totalTonnage.toLocaleString()} kg`
-                      : '0 kg'}
+                      ? `${(isImperial ? Math.round(computeTotalTonnage(todayWorkout) * 2.20462) : Math.round(computeTotalTonnage(todayWorkout))).toLocaleString()} ${isImperial ? 'lbs' : 'kg'}`
+                      : `0 ${isImperial ? 'lbs' : 'kg'}`}
                   </span>
                 </div>
 
@@ -963,28 +1006,34 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                   <svg viewBox="0 0 100 100" className="w-full h-auto max-h-[170px]" style={{ filter: 'drop-shadow(0 0 2px rgba(255,255,255,0.02))' }}>
                     <style>{`
                       @keyframes cyanPulse {
-                        0%, 100% { opacity: 0.85; filter: drop-shadow(0 0 1px rgba(0, 240, 255, 0.4)); stroke-width: 1.2px; }
-                        50% { opacity: 1.0; filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.8)); stroke-width: 1.6px; }
+                        0%, 100% { opacity: 0.85; stroke-width: 1.2px; }
+                        50% { opacity: 1.0; stroke-width: 1.6px; }
                       }
                       @keyframes amberPulse {
-                        0%, 100% { opacity: 0.6; filter: drop-shadow(0 0 1px rgba(255, 170, 0, 0.3)); stroke-width: 1.2px; }
-                        50% { opacity: 1.0; filter: drop-shadow(0 0 6px rgba(255, 170, 0, 0.9)); stroke-width: 1.8px; }
+                        0%, 100% { opacity: 0.6; stroke-width: 1.2px; }
+                        50% { opacity: 1.0; stroke-width: 1.8px; }
                       }
                       @keyframes crimsonPulse {
-                        0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 1px rgba(255, 51, 85, 0.2)); stroke-width: 1.2px; }
-                        50% { opacity: 1.0; filter: drop-shadow(0 0 10px rgba(255, 51, 85, 1)); stroke-width: 2.0px; }
+                        0%, 100% { opacity: 0.5; stroke-width: 1.2px; }
+                        50% { opacity: 1.0; stroke-width: 2.0px; }
                       }
                       .muscle-cyan {
                         animation: cyanPulse 5s ease-in-out infinite;
                         transition: all 0.3s ease;
+                        filter: url(#cyan-glow);
+                        will-change: opacity;
                       }
                       .muscle-amber {
                         animation: amberPulse 2.5s ease-in-out infinite;
                         transition: all 0.3s ease;
+                        filter: url(#amber-glow);
+                        will-change: opacity;
                       }
                       .muscle-crimson {
                         animation: crimsonPulse 1.5s ease-in-out infinite;
                         transition: all 0.3s ease;
+                        filter: url(#crimson-glow);
+                        will-change: opacity;
                       }
                     `}</style>
                     <defs>
@@ -1239,7 +1288,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                               Key Lift Target
                             </span>
                             <span className="text-white-adj font-bold truncate max-w-[140px] tabular-nums">
-                              {splitGhostBest.weight}kg x {splitGhostBest.reps}
+                              {isImperial ? `${Math.round(splitGhostBest.weight * 2.20462)} lbs` : `${splitGhostBest.weight} kg`} x {splitGhostBest.reps}
                             </span>
                           </div>
                           <div className="flex justify-between items-center text-[10px]">
@@ -1247,7 +1296,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                               Target Lifts
                             </span>
                             <span className="text-white-adj font-bold tabular-nums">
-                              {session.totalTonnage.toLocaleString()} kg
+                              {(isImperial ? Math.round(computeTotalTonnage(session) * 2.20462) : Math.round(computeTotalTonnage(session))).toLocaleString()} {isImperial ? 'lbs' : 'kg'}
                             </span>
                           </div>
                         </>
@@ -1345,31 +1394,33 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
           opacity: scrolled ? 1 : 0
         }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="fixed top-0 left-0 right-0 z-40 bg-[#020202]/90 backdrop-blur-md border-b border-white/5 py-3.5 px-4 flex items-center justify-between max-w-md mx-auto"
+        className="fixed top-0 left-0 right-0 z-40 bg-[#020202]/90 backdrop-blur-md border-b border-white/5 py-3.5 px-4"
         style={{ pointerEvents: scrolled ? 'auto' : 'none' }}
       >
-        <div className="flex items-center gap-2">
-          <Image
-            src="/Frame 166.png"
-            alt="FORMA Logo"
-            width={70}
-            height={16}
-            priority
-            style={{ height: 'auto' }}
-            className="h-4 w-auto object-contain"
-          />
-          <span className="text-[10px] text-zinc-500 font-mono border-l border-white/10 pl-2">
-            {todayWorkout?.title}
-          </span>
+        <div className="max-w-md md:max-w-4xl lg:max-w-5xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Image
+              src="/Frame 166.png"
+              alt="FORMA Logo"
+              width={70}
+              height={16}
+              priority
+              style={{ height: 'auto' }}
+              className="h-4 w-auto object-contain"
+            />
+            <span className="text-[10px] text-zinc-500 font-mono border-l border-white/10 pl-2">
+              {todayWorkout?.title}
+            </span>
+          </div>
+          {onEditProgram && (
+            <button
+              onClick={onEditProgram}
+              className="px-2.5 py-1 rounded text-[8px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white bg-white/5 border border-white/10 cursor-pointer"
+            >
+              Edit Split
+            </button>
+          )}
         </div>
-        {onEditProgram && (
-          <button
-            onClick={onEditProgram}
-            className="px-2.5 py-1 rounded text-[8px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white bg-white/5 border border-white/10 cursor-pointer"
-          >
-            Edit Split
-          </button>
-        )}
       </motion.div>
 
       {/* Anatomical Muscle Recovery Drawer */}

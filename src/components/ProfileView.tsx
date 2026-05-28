@@ -21,7 +21,8 @@ export default function ProfileView() {
     resetData: onResetData,
     signOut: onSignOut,
     triggerHaptic,
-    setShowOnboarding
+    setShowOnboarding,
+    showToast
   } = useApp();
 
   const [weightHistory, setWeightHistory] = useState<Array<{ date: string; weight: number }>>([]);
@@ -81,7 +82,6 @@ export default function ProfileView() {
   const [showHealthModal, setShowHealthModal] = useState(false);
   const [selectedHealthPlatform, setSelectedHealthPlatform] = useState<'apple' | 'google' | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [showToast, setShowToast] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const isImperial = userProfile.units === 'imperial';
@@ -125,9 +125,8 @@ export default function ProfileView() {
     });
 
     if (healthConnected !== 'none') {
-      setShowToast(`Weight synced to ${healthConnected === 'apple' ? 'Apple Health' : 'Google Fit'}`);
+      showToast(`Weight synced to ${healthConnected === 'apple' ? 'Apple Health' : 'Google Fit'}`);
       triggerHaptic([40]);
-      setTimeout(() => setShowToast(null), 2500);
     } else {
       triggerHaptic([40]);
     }
@@ -159,8 +158,7 @@ export default function ProfileView() {
     setShowHealthModal(false);
     triggerHaptic([30, 60, 30]); // double vibrate on connect success
     
-    setShowToast(`Linked successfully to ${platform === 'apple' ? 'Apple Health' : 'Google Fit'}!`);
-    setTimeout(() => setShowToast(null), 3000);
+    showToast(`Linked successfully to ${platform === 'apple' ? 'Apple Health' : 'Google Fit'}!`);
   };
 
   const requestNotificationPermission = async () => {
@@ -186,28 +184,24 @@ export default function ProfileView() {
             });
           }
           
-          setShowToast('Daily reminders active!');
-          setTimeout(() => setShowToast(null), 2500);
+          showToast('Daily reminders active!');
         } else {
           setNotificationsEnabled(false);
           localStorage.setItem('forma_notifications_enabled', 'false');
-          setShowToast('Notification permission denied.');
-          setTimeout(() => setShowToast(null), 2500);
+          showToast('Notification permission denied.');
         }
       } catch (e) {
         // Fallback for ios/unsupported browsers
         setNotificationsEnabled(true);
         localStorage.setItem('forma_notifications_enabled', 'true');
         triggerHaptic([30, 50, 30]);
-        setShowToast('Daily reminders active (Simulated)!');
-        setTimeout(() => setShowToast(null), 2500);
+        showToast('Daily reminders active (Simulated)!');
       }
     } else {
       setNotificationsEnabled(true);
       localStorage.setItem('forma_notifications_enabled', 'true');
       triggerHaptic([30, 50, 30]);
-      setShowToast('Daily reminders active (Simulated)!');
-      setTimeout(() => setShowToast(null), 2500);
+      showToast('Daily reminders active (Simulated)!');
     }
   };
 
@@ -687,8 +681,7 @@ export default function ProfileView() {
                     if (healthConnected !== 'none') {
                       setHealthConnected('none');
                       localStorage.setItem('forma_health_sync', 'none');
-                      setShowToast('Disconnected from health platforms.');
-                      setTimeout(() => setShowToast(null), 2500);
+                      showToast('Disconnected from health platforms.');
                     } else {
                       setShowHealthModal(true);
                     }
@@ -856,20 +849,7 @@ export default function ProfileView() {
         </p>
       </motion.div>
 
-      {/* Premium Sliding Toast Notification */}
-      <AnimatePresence>
-        {showToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-24 left-4 right-4 z-50 p-4 rounded-2xl bg-zinc-900 border border-white/10 shadow-2xl flex items-center gap-3 max-w-sm mx-auto pointer-events-none"
-          >
-            <Sparkles className="text-cyan-400 flex-shrink-0 animate-pulse" size={18} />
-            <p className="text-xs text-white font-medium">{showToast}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
 
       {/* Apple Health / Google Fit Mock Consent Modal */}
       <AnimatePresence>
@@ -963,8 +943,7 @@ export default function ProfileView() {
                   onClick={async () => {
                     setShowResetConfirm(false);
                     await onResetData();
-                    setShowToast('All workout data has been reset.');
-                    setTimeout(() => setShowToast(null), 3000);
+                    showToast('All workout data has been reset.');
                   }}
                   className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all cursor-pointer active-glow shadow-lg shadow-red-600/25"
                 >

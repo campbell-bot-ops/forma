@@ -2,21 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { WorkoutSession, GENESIS_SPLIT } from '@/constants/workout';
-
-export interface UserSession {
-  name: string;
-  email: string;
-  token: string;
-}
-
-export interface UserProfile {
-  name: string;
-  email: string;
-  weight: number;
-  height: number;
-  bodyFat: number;
-  units?: 'metric' | 'imperial';
-}
+import { UserProfile, UserSession } from '@/types/workout';
 
 // Simulated network latency helper
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -53,6 +39,8 @@ if (typeof window !== 'undefined') {
     console.warn('FORMA: Supabase credentials not configured in .env.local. Running in local storage simulator mode.');
   }
 }
+
+let isSyncing = false;
 
 export const db = {
   /**
@@ -763,8 +751,10 @@ export const db = {
         cnsScore: row.cns_score,
         recoveryDetails: row.recovery_details,
         restDetails: row.rest_details,
-        cardioDetails: row.cardio_details
-      }));
+        cardioDetails: row.cardio_details,
+        notes: row.notes || row.cardio_details?.notes || row.rest_details?.notes || undefined,
+        tags: row.tags || row.cardio_details?.tags || row.rest_details?.tags || undefined
+      })).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('forma_history', JSON.stringify(history));
@@ -820,8 +810,18 @@ export const db = {
             logs: completedLog.logs || {},
             cns_score: completedLog.cnsScore || null,
             recovery_details: completedLog.recoveryDetails || null,
-            rest_details: completedLog.restDetails || null,
-            cardio_details: completedLog.cardioDetails || null
+            rest_details: completedLog.restDetails ? {
+              ...completedLog.restDetails,
+              notes: completedLog.notes || completedLog.restDetails.notes
+            } : null,
+            cardio_details: completedLog.cardioDetails ? {
+              ...completedLog.cardioDetails,
+              notes: completedLog.notes,
+              tags: completedLog.tags
+            } : (completedLog.notes || completedLog.tags ? {
+              notes: completedLog.notes,
+              tags: completedLog.tags
+            } : null)
           })
           .select()) as any;
 
@@ -901,6 +901,44 @@ export const db = {
     }
 
     return history;
+  },
+
+  /**
+   * Delete a completed workout from history
+   */
+  async deleteWorkout(date: string, sessionId: string, id?: string): Promise<any[]> {
+    let localHistory: any[] = [];
+    if (typeof window !== 'undefined') {
+      const historyStr = localStorage.getItem('forma_history');
+      if (historyStr) {
+        try {
+          localHistory = JSON.parse(historyStr);
+        } catch (e) {}
+      }
+      localHistory = localHistory.filter(item => !(item.date === date && item.sessionId === sessionId));
+      localStorage.setItem('forma_history', JSON.stringify(localHistory));
+    }
+
+    if (!isSupabaseConfigured()) {
+      return localHistory;
+    }
+
+    try {
+      const supabase = getSupabase();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (user) {
+        if (id) {
+          await (supabase.from('workout_history') as any).delete().eq('id', id).eq('user_id', user.id);
+        } else {
+          await (supabase.from('workout_history') as any).delete().eq('date', date).eq('session_id', sessionId).eq('user_id', user.id);
+        }
+      }
+    } catch (e) {
+      console.warn("FORMA Offline Workout Deletion Fallback:", e);
+    }
+
+    return localHistory;
   },
 
   /**
@@ -1051,6 +1089,8 @@ export const db = {
    */
   async syncOfflineQueue(): Promise<void> {
     if (!isSupabaseConfigured()) return;
+    if (isSyncing) return;
+    isSyncing = true;
     try {
       const supabase = getSupabase();
       const { data: { user } } = await supabase.auth.getUser();
@@ -1099,8 +1139,18 @@ export const db = {
                 logs: completedLog.logs || {},
                 cns_score: completedLog.cnsScore || null,
                 recovery_details: completedLog.recoveryDetails || null,
-                rest_details: completedLog.restDetails || null,
-                cardio_details: completedLog.cardioDetails || null
+                rest_details: completedLog.restDetails ? {
+                  ...completedLog.restDetails,
+                  notes: completedLog.notes || completedLog.restDetails.notes
+                } : null,
+                cardio_details: completedLog.cardioDetails ? {
+                  ...completedLog.cardioDetails,
+                  notes: completedLog.notes,
+                  tags: completedLog.tags
+                } : (completedLog.notes || completedLog.tags ? {
+                  notes: completedLog.notes,
+                  tags: completedLog.tags
+                } : null)
               })
               .select()) as any;
 
@@ -1109,7 +1159,21 @@ export const db = {
             }
           }
 
-          localStorage.setItem('forma_history', JSON.stringify(localHistory));
+          // Re-load the history from localStorage to ensure we don't overwrite changes made during the sync loop
+          const currentHistoryStr = localStorage.getItem('forma_history');
+          if (currentHistoryStr) {
+            const currentHistory = JSON.parse(currentHistoryStr);
+            const localHistoryMap = new Map(localHistory.filter(item => item.id).map(item => [item.date + '-' + item.sessionId, item.id]));
+            currentHistory.forEach((item: any) => {
+              const key = item.date + '-' + item.sessionId;
+              if (localHistoryMap.has(key)) {
+                item.id = localHistoryMap.get(key);
+              }
+            });
+            localStorage.setItem('forma_history', JSON.stringify(currentHistory));
+          } else {
+            localStorage.setItem('forma_history', JSON.stringify(localHistory));
+          }
         } catch (e) {
           console.warn("FORMA Offline Reconcile History Error:", e);
         }
@@ -1134,6 +1198,8 @@ export const db = {
       }
     } catch (e) {
       console.warn("syncOfflineQueue failed", e);
+    } finally {
+      isSyncing = false;
     }
   }
 };

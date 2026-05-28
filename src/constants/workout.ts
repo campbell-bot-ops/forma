@@ -349,6 +349,7 @@ export interface LoggedSet {
   weight: number;
   reps: number;
   rpe: number;
+  isWarmup?: boolean;
 }
 
 export interface LoggedWorkout {
@@ -359,6 +360,48 @@ export interface LoggedWorkout {
     [exerciseId: string]: LoggedSet[];
   };
 }
+
+/**
+ * Dynamically compute the total tonnage for a session from its ghost sets.
+ * Returns Σ(weight × reps) across all exercises and sets.
+ */
+export const computeTotalTonnage = (session: WorkoutSession): number => {
+  if (!session.exercises || session.exercises.length === 0) return 0;
+  return session.exercises.reduce((total, ex) => {
+    return total + ex.ghostSets.reduce((exTotal, gs) => {
+      return exTotal + (gs.weight * gs.reps);
+    }, 0);
+  }, 0);
+};
+
+/**
+ * Compute estimated 1RM using a safe hybrid formula.
+ * - Brzycki for reps 1-10 (most accurate range)
+ * - Epley for reps 11-30 (degrades more gracefully)
+ * - Returns 0 for reps > 30, weight = 0, or invalid inputs
+ */
+export const computeEstimated1RM = (weight: number, reps: number): number => {
+  if (weight <= 0 || reps <= 0 || reps > 30) return 0;
+  if (reps === 1) return weight;
+
+  if (reps <= 10) {
+    // Brzycki formula — most accurate for 1-10 rep range
+    const denominator = 1.0278 - 0.0278 * reps;
+    if (denominator <= 0) return 0;
+    return weight / denominator;
+  }
+
+  // Epley formula — degrades more gracefully for 11-30 reps
+  return weight * (1 + reps / 30);
+};
+
+/**
+ * Compute total target sets count for a workout session.
+ */
+export const computeTotalTargetSets = (session: WorkoutSession): number => {
+  if (!session.exercises || session.exercises.length === 0) return 0;
+  return session.exercises.reduce((total, ex) => total + ex.defaultSets, 0);
+};
 
 export const ARCHIVE_WEEKLY_AUDIT = {
   strengthChange: "+6.8%",

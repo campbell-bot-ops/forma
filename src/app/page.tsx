@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/context/AppContext';
 import { db } from '@/utils/db';
+import { Sparkles } from 'lucide-react';
 
 // Component Views
 import LoadingScreen from '@/components/LoadingScreen';
@@ -62,7 +63,8 @@ export default function Home() {
     triggerHaptic,
     showOnboarding,
     setShowOnboarding,
-    isOnline
+    isOnline,
+    toast
   } = useApp();
 
   const [prevTab, setPrevTab] = useState<TabId>('horizon');
@@ -385,6 +387,21 @@ export default function Home() {
         onClose={() => setCnsSurveyOpen(false)}
         onComplete={completeCnsSurvey}
       />
+
+      {/* Global Sliding Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-24 left-4 right-4 z-[999] p-4 rounded-2xl bg-zinc-950/90 border border-white/10 shadow-2xl flex items-center gap-3 max-w-sm mx-auto pointer-events-none"
+          >
+            <Sparkles className="text-cyan-400 flex-shrink-0 animate-pulse" size={18} />
+            <p className="text-xs text-white font-medium">{toast}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

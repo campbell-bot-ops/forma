@@ -37,6 +37,10 @@ export interface CompletedWorkout {
   date: string;
   actualTonnage: number;
   logs: ExerciseLogs;
+  completedSetsCount?: number;
+  totalSetsCount?: number;
+  notes?: string;
+  tags?: string[];
   cnsScore?: number;
   cardioDetails?: CardioDetails;
   recoveryDetails?: RecoveryDetails;

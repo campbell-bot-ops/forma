@@ -3,8 +3,9 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Download, Check, ShieldCheck, Dumbbell, MapPin, Zap } from 'lucide-react';
-import { UserProfile } from '@/utils/db';
+import { UserProfile } from '@/types/workout';
 import { useApp } from '@/context/AppContext';
+import { computeEstimated1RM, computeTotalTonnage } from '@/constants/workout';
 
 interface ShareCardModalProps {
   isOpen: boolean;
@@ -70,32 +71,31 @@ export default function ShareCardModal({
     Object.keys(logs).forEach(exId => {
       const sets = logs[exId];
       if (Array.isArray(sets)) {
-        totalSets += sets.length;
-        sets.forEach((s: any) => {
-          if (s) {
-            const rpeVal = typeof s.rpe === 'number' ? s.rpe : 8;
-            const repsVal = typeof s.reps === 'number' ? s.reps : 0;
-            const weightVal = typeof s.weight === 'number' ? s.weight : 0;
+        const workingSets = sets.filter((s: any) => s && !s.isWarmup);
+        totalSets += workingSets.length;
+        workingSets.forEach((s: any) => {
+          const rpeVal = typeof s.rpe === 'number' ? s.rpe : 8;
+          const repsVal = typeof s.reps === 'number' ? s.reps : 0;
+          const weightVal = typeof s.weight === 'number' ? s.weight : 0;
 
-            sumRpe += rpeVal;
-            rpeCount++;
+          sumRpe += rpeVal;
+          rpeCount++;
 
-            if (weightVal > topLiftWeight) {
-              topLiftWeight = weightVal;
-              topLiftName = exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-              topLiftReps = repsVal;
-            }
-            // Effective Reps = max(0, min(reps, 5 - (10 - RPE)))
-            const eff = Math.max(0, Math.min(repsVal, 5 - (10 - rpeVal)));
-            totalEffectiveReps += eff;
+          if (weightVal > topLiftWeight) {
+            topLiftWeight = weightVal;
+            topLiftName = exId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            topLiftReps = repsVal;
           }
+          // Effective Reps = max(0, min(reps, 5 - (10 - RPE)))
+          const eff = Math.max(0, Math.min(repsVal, 5 - (10 - rpeVal)));
+          totalEffectiveReps += eff;
         });
       }
     });
   }
 
   const avgRpe = rpeCount > 0 ? (sumRpe / rpeCount).toFixed(1) : '8.0';
-  const topLift1RMEst = topLiftWeight > 0 ? Math.round(topLiftWeight / (1.0278 - 0.0278 * topLiftReps)) : 0;
+  const topLift1RMEst = topLiftWeight > 0 ? Math.round(computeEstimated1RM(topLiftWeight, topLiftReps)) : 0;
 
   // Weight Displays
   const displayWeight = (wKg: number) => {
@@ -689,7 +689,7 @@ export default function ShareCardModal({
 
   const drawWrappedCanvas = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     const sessionObj = sessions?.find(s => s.title === sessionTitle);
-    const rawTargetTonnage = sessionObj?.totalTonnage || 4000;
+    const rawTargetTonnage = sessionObj ? computeTotalTonnage(sessionObj) : 4000;
     const tonnageProgress = Math.min(100, Math.round((actualTonnage / rawTargetTonnage) * 100)) || 100;
 
     let targetReps = 0;
@@ -1333,7 +1333,7 @@ export default function ShareCardModal({
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center py-2">
               {(() => {
                 const sessionObj = sessions?.find(s => s.title === sessionTitle);
-                const rawTargetTonnage = sessionObj?.totalTonnage || 4000;
+                const rawTargetTonnage = sessionObj ? computeTotalTonnage(sessionObj) : 4000;
                 const tonnageProgress = Math.min(100, Math.round((actualTonnage / rawTargetTonnage) * 100)) || 100;
 
                 let targetReps = 0;
