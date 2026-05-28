@@ -141,6 +141,78 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
 
   const personalRecords = calculatePersonalRecords(workoutHistory);
 
+  const isImperial = units === 'imperial';
+
+  // Lifetime biophysical diagnostics calculations
+  let lifetimeTonnage = 0;
+  let lifetimeLissMins = 0;
+  let weightSessionsCount = 0;
+  let recoverySessionsCount = 0;
+  let restSessionsCount = 0;
+  
+  const muscleGroupsVolume: Record<string, number> = {
+    Chest: 0,
+    Back: 0,
+    Shoulders: 0,
+    Arms: 0,
+    Quads: 0,
+    Hamstrings: 0,
+    Core: 0
+  };
+
+  const exerciseMuscleMapping: Record<string, string> = {
+    'incline-db-press': 'Chest',
+    'flat-bench-press': 'Chest',
+    'lat-pulldowns': 'Back',
+    'seated-cable-rows': 'Back',
+    'bent-over-rows': 'Back',
+    'face-pulls': 'Shoulders',
+    'overhead-press': 'Shoulders',
+    'lateral-raises': 'Shoulders',
+    'bicep-curls-db': 'Arms',
+    'tricep-overhead-extensions': 'Arms',
+    'goblet-squat': 'Quads',
+    'leg-press': 'Quads',
+    'leg-extensions': 'Quads',
+    'walking-lunges': 'Quads',
+    'romanian-deadlifts': 'Hamstrings',
+    'leg-curls': 'Hamstrings',
+    'hanging-leg-raises': 'Core',
+    'planks': 'Core',
+    'weighted-russian-twists': 'Core'
+  };
+
+  workoutHistory.forEach(log => {
+    lifetimeTonnage += log.actualTonnage || 0;
+    
+    // LISS cardio walk duration accumulator
+    if (log.cardioDetails?.duration) lifetimeLissMins += Number(log.cardioDetails.duration);
+    if (log.recoveryDetails?.duration) lifetimeLissMins += Number(log.recoveryDetails.duration);
+    if (log.restDetails?.walkLogged) lifetimeLissMins += 30;
+
+    // Workout type ratio
+    if (log.actualTonnage > 0) {
+      weightSessionsCount++;
+    } else if (log.recoveryDetails) {
+      recoverySessionsCount++;
+    } else if (log.restDetails) {
+      restSessionsCount++;
+    }
+
+    // Accumulate sets per muscle group
+    if (log.logs) {
+      Object.keys(log.logs).forEach(exId => {
+        const setCount = log.logs[exId]?.length || 0;
+        const muscle = exerciseMuscleMapping[exId] || 'Back';
+        if (muscleGroupsVolume[muscle] !== undefined) {
+          muscleGroupsVolume[muscle] += setCount;
+        }
+      });
+    }
+  });
+
+  const totalSetsLogged = Object.values(muscleGroupsVolume).reduce((a, b) => a + b, 0) || 1;
+
   // Motion values for 3D card tilt
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -502,36 +574,62 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
 
             {/* Tooltip Overlay */}
             <AnimatePresence>
-              {activeHoverIdx !== null && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="absolute top-20 left-5 right-5 glass-panel border-white/10 bg-black/95 rounded-xl p-3 flex justify-between items-center z-20 pointer-events-none"
-                >
-                  <div>
-                    <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-mono font-bold">
-                      {chartData[activeHoverIdx].name || `Log ${activeHoverIdx + 1}`}
+              {activeHoverIdx !== null && (() => {
+                const count = chartData.length;
+                const spacing = 300 / (count + 1);
+                const xVal = 10 + spacing * (activeHoverIdx + 1);
+                const leftPercent = (xVal / 320) * 100;
+                
+                return (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                    transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                    className="absolute z-20 glass-panel border-white/10 bg-black/90 rounded-xl p-2.5 shadow-xl pointer-events-none flex flex-col gap-1 min-w-[130px]"
+                    style={{
+                      left: `${leftPercent}%`,
+                      transform: 'translateX(-50%)',
+                      top: '20px',
+                    }}
+                  >
+                    <p className="text-[7px] text-zinc-500 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-0.5 text-center">
+                      {chartData[activeHoverIdx].week}
                     </p>
-                    <p className="text-xs font-bold text-white mt-1 leading-none">
-                      Volume: <span className="font-mono text-zinc-300">{Math.round(chartData[activeHoverIdx].tonnage).toLocaleString()} kg</span>
-                    </p>
-                  </div>
-                  <div className="text-right flex flex-col gap-0.5 leading-none">
-                    <span className="text-[9px] text-cyan-400 font-bold font-mono">
-                      Est 1RM: {Math.round(chartData[activeHoverIdx].strength1RM)} kg
-                    </span>
-                    <span className="text-[9px] text-amber-400 font-bold font-mono">
-                      CNS Status: {Math.round(chartData[activeHoverIdx].cnsScore)}%
-                    </span>
-                  </div>
-                </motion.div>
-              )}
+                    <div className="flex flex-col gap-0.5 text-[9px] text-zinc-400 font-mono">
+                      <div className="flex justify-between gap-3">
+                        <span>Volume:</span>
+                        <span className="text-white font-bold">{Math.round(chartData[activeHoverIdx].tonnage).toLocaleString()} kg</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span>Est 1RM:</span>
+                        <span className="text-cyan-400 font-bold">{Math.round(chartData[activeHoverIdx].strength1RM)} kg</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span>CNS Status:</span>
+                        <span className="text-amber-400 font-bold">{Math.round(chartData[activeHoverIdx].cnsScore)}%</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })()}
             </AnimatePresence>
 
             {/* Chart Canvas drawing area (SVG) */}
             <div className="relative h-44 w-full mt-2">
               <svg viewBox="0 0 320 100" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                {/* SVG definitions for gradient fills */}
+                <defs>
+                  <linearGradient id="strength-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.15" />
+                    <stop offset="100%" stopColor="#00f0ff" stopOpacity="0.0" />
+                  </linearGradient>
+                  <linearGradient id="cns-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ffaa00" stopOpacity="0.08" />
+                    <stop offset="100%" stopColor="#ffaa00" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+
                 {/* Grid background horizontal lines */}
                 <line x1="10" y1="20" x2="310" y2="20" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
                 <line x1="10" y1="50" x2="310" y2="50" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
@@ -556,19 +654,19 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                         y={yTonnage}
                         width="16"
                         height={95 - yTonnage}
-                        fill="rgba(255,255,255,0.04)"
-                        stroke="rgba(255,255,255,0.08)"
+                        fill="rgba(255,255,255,0.03)"
+                        stroke="rgba(255,255,255,0.06)"
                         strokeWidth="0.5"
                         rx="1.5"
-                        className="transition-all duration-300 animate-pulse"
+                        className="transition-all duration-300"
                       />
 
-                      {/* Scrub helper hover lines */}
+                      {/* Scrub helper hover lines and indicator dots */}
                       {activeHoverIdx === idx && (
                         <>
-                          <line x1={x} y1="10" x2={x} y2="95" stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="2 2" />
-                          <circle cx={x} cy={y1RM} r="3.5" fill="#00f0ff" stroke="white" strokeWidth="1" />
-                          <circle cx={x} cy={yCNS} r="3.5" fill="#ffaa00" stroke="white" strokeWidth="1" />
+                          <line x1={x} y1="10" x2={x} y2="95" stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="2 2" />
+                          <circle cx={x} cy={y1RM} r="3" fill="#00f0ff" stroke="#020202" strokeWidth="1" />
+                          <circle cx={x} cy={yCNS} r="3" fill="#ffaa00" stroke="#020202" strokeWidth="1" />
                         </>
                       )}
 
@@ -580,7 +678,7 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                   );
                 })}
 
-                {/* Draw 1RM Cyan Line Path */}
+                {/* Draw 1RM Area & Line Path */}
                 {chartData.length >= 2 && (() => {
                   const count = chartData.length;
                   const spacing = 300 / (count + 1);
@@ -590,10 +688,20 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                     const y = 95 - (d.strength1RM / max1RMVal) * 70;
                     pathStr += `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
                   });
-                  return <path d={pathStr} fill="none" stroke="#00f0ff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />;
+
+                  const firstX = 10 + spacing;
+                  const lastX = 10 + spacing * count;
+                  const areaStr = `${pathStr} L ${lastX} 95 L ${firstX} 95 Z`;
+
+                  return (
+                    <g>
+                      <path d={areaStr} fill="url(#strength-area-gradient)" />
+                      <path d={pathStr} fill="none" stroke="#00f0ff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </g>
+                  );
                 })()}
 
-                {/* Draw CNS Readiness Amber Dashed Line Path */}
+                {/* Draw CNS Readiness Area & Line Path */}
                 {chartData.length >= 2 && (() => {
                   const count = chartData.length;
                   const spacing = 300 / (count + 1);
@@ -603,7 +711,17 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                     const y = 95 - (d.cnsScore / 100) * 70;
                     pathStr += `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
                   });
-                  return <path d={pathStr} fill="none" stroke="#ffaa00" strokeWidth="1.2" strokeDasharray="3 3" strokeLinecap="round" strokeLinejoin="round" />;
+
+                  const firstX = 10 + spacing;
+                  const lastX = 10 + spacing * count;
+                  const areaStr = `${pathStr} L ${lastX} 95 L ${firstX} 95 Z`;
+
+                  return (
+                    <g>
+                      <path d={areaStr} fill="url(#cns-area-gradient)" />
+                      <path d={pathStr} fill="none" stroke="#ffaa00" strokeWidth="1.2" strokeDasharray="3 3" strokeLinecap="round" strokeLinejoin="round" />
+                    </g>
+                  );
                 })()}
 
                 {/* Interactive invisible hover rectangles */}
@@ -639,6 +757,89 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
         </motion.div>
 
       </div>
+
+      {/* Lifetime Biophysical Diagnostics */}
+      <motion.div variants={itemVariants} className="w-full flex flex-col gap-3">
+        <span className="text-[10px] font-bold tracking-widest text-zinc-500 uppercase px-1">
+          Lifetime Biophysical Diagnostics
+        </span>
+        <div className="glass-panel rounded-3xl p-5 flex flex-col gap-6 w-full">
+          
+          {/* Top: 2 grid boxes for Lifetime Tonnage and LISS Duration */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex flex-col justify-between min-h-[90px]">
+              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                Lifetime Tonnage
+              </span>
+              <p className="text-xl font-extrabold text-white font-mono leading-none">
+                {isImperial ? Math.round(lifetimeTonnage * 2.20462).toLocaleString() : Math.round(lifetimeTonnage).toLocaleString()} <span className="text-[10px] font-bold text-zinc-500">{isImperial ? 'lbs' : 'kg'}</span>
+              </p>
+              <span className="text-[8px] text-zinc-500 mt-1 block">Total Workload Lifted</span>
+            </div>
+
+            <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 flex flex-col justify-between min-h-[90px]">
+              <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                LISS Duration
+              </span>
+              <p className="text-xl font-extrabold text-cyan-400 font-mono leading-none">
+                {lifetimeLissMins} <span className="text-[10px] font-bold text-zinc-500">Mins</span>
+              </p>
+              <span className="text-[8px] text-zinc-500 mt-1 block">Accumulated Zone 2 Cardio</span>
+            </div>
+          </div>
+
+          <div className="h-[1px] bg-white/5 w-full" />
+
+          {/* Middle: Muscle Group Volume Distribution */}
+          <div>
+            <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold block mb-3 font-mono">
+              Volume Distribution (Sets Logged)
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+              {Object.keys(muscleGroupsVolume).map((muscle) => {
+                const sets = muscleGroupsVolume[muscle];
+                const pct = Math.round((sets / totalSetsLogged) * 100);
+                
+                return (
+                  <div key={muscle} className="flex flex-col gap-1 text-[10px]">
+                    <div className="flex justify-between font-medium">
+                      <span className="text-white-adj font-semibold">{muscle}</span>
+                      <span className="text-zinc-500 font-mono">{sets} sets ({pct}%)</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-cyan-400 rounded-full transition-all duration-500" 
+                        style={{ width: `${pct}%` }} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="h-[1px] bg-white/5 w-full" />
+
+          {/* Bottom: Workout Types Ratio */}
+          <div className="flex justify-around items-center py-1 text-center font-mono">
+            <div>
+              <span className="text-[8px] uppercase text-zinc-500 font-bold block mb-1">Weights</span>
+              <p className="text-sm font-bold text-white">{weightSessionsCount} sessions</p>
+            </div>
+            <div className="w-[1px] h-6 bg-white/5" />
+            <div>
+              <span className="text-[8px] uppercase text-zinc-500 font-bold block mb-1">Recovery</span>
+              <p className="text-sm font-bold text-cyan-400">{recoverySessionsCount} sessions</p>
+            </div>
+            <div className="w-[1px] h-6 bg-white/5" />
+            <div>
+              <span className="text-[8px] uppercase text-zinc-500 font-bold block mb-1">Rest</span>
+              <p className="text-sm font-bold text-zinc-500">{restSessionsCount} sessions</p>
+            </div>
+          </div>
+
+        </div>
+      </motion.div>
 
       {/* Timeline of Completed Workout Logs & PR Wall Toggle */}
       {!isHistoryEmpty ? (

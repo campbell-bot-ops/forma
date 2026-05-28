@@ -142,6 +142,77 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Daily notification reminders check
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let lastHydrationDate = '';
+    let lastWorkoutDate = '';
+
+    const checkNotifications = async () => {
+      const isNotificationsEnabled = localStorage.getItem('forma_notifications_enabled') === 'true';
+      if (!isNotificationsEnabled) return;
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+      const now = new Date();
+      const todayStr = now.toDateString();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+
+      // Daily Hydration Check at 2:00 PM (14:00)
+      if (hours === 14 && minutes === 0 && lastHydrationDate !== todayStr) {
+        lastHydrationDate = todayStr;
+        
+        const title = 'FORMA Cellular Hydration';
+        const body = 'Aligning Physical Architecture: Time to hydrate and calibrate optimal cellular recovery.';
+        
+        if (hapticEnabled && navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
+
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          reg.showNotification(title, {
+            body,
+            icon: '/Frame 166.png',
+            badge: '/Frame 166.png'
+          });
+        } else {
+          new Notification(title, { body, icon: '/Frame 166.png' });
+        }
+      }
+
+      // Daily Workout / Training check-in prompt at 4:00 PM (16:00)
+      if (hours === 16 && minutes === 0 && lastWorkoutDate !== todayStr) {
+        lastWorkoutDate = todayStr;
+        
+        const title = 'FORMA Architecture Check';
+        const body = 'Review your daily session split and log today\'s progress to maintain consistency.';
+        
+        if (hapticEnabled && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          reg.showNotification(title, {
+            body,
+            icon: '/Frame 166.png',
+            badge: '/Frame 166.png'
+          });
+        } else {
+          new Notification(title, { body, icon: '/Frame 166.png' });
+        }
+      }
+    };
+
+    // Run check immediately, then every 30 seconds
+    checkNotifications();
+    const interval = setInterval(checkNotifications, 30000);
+
+    return () => clearInterval(interval);
+  }, [hapticEnabled]);
+
   // Standard haptic vibration helper
   const triggerHaptic = (pattern: number[]) => {
     if (hapticEnabled && typeof navigator !== 'undefined' && navigator.vibrate) {

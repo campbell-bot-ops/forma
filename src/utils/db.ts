@@ -929,12 +929,13 @@ export const db = {
   async logWeight(weight: number): Promise<Array<{ date: string; weight: number }>> {
     const history = await this.getWeightHistory();
     const todayStr = new Date().toDateString();
+    const entryDate = new Date().toISOString();
     
     // Replace today's log if it exists, otherwise append
     const filtered = history.filter(item => new Date(item.date).toDateString() !== todayStr);
     const updated = [
       ...filtered,
-      { date: new Date().toISOString(), weight: parseFloat(weight.toFixed(1)) }
+      { date: entryDate, weight: parseFloat(weight.toFixed(1)) }
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     if (typeof window !== 'undefined') {
@@ -944,6 +945,24 @@ export const db = {
     // Sync current profile weight
     const profile = await this.getUserProfile();
     await this.saveUserProfile({ ...profile, weight });
+
+    // Sync weight history entry back to Supabase if active
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await (supabase.from('weight_history') as any)
+            .upsert({
+              user_id: user.id,
+              date: entryDate,
+              weight: parseFloat(weight.toFixed(1))
+            }, { onConflict: 'user_id,date' });
+        }
+      } catch (e) {
+        console.warn("FORMA Immediate Weight History Sync Fallback (table may not exist):", e);
+      }
+    }
     
     return updated;
   },
@@ -964,6 +983,22 @@ export const db = {
       const mostRecent = [...updated].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
       const profile = await this.getUserProfile();
       await this.saveUserProfile({ ...profile, weight: mostRecent.weight });
+    }
+
+    // Try to delete from Supabase table if active
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await (supabase.from('weight_history') as any)
+            .delete()
+            .eq('user_id', user.id)
+            .eq('date', dateString);
+        }
+      } catch (e) {
+        console.warn("FORMA Weight History Delete Sync Fallback:", e);
+      }
     }
     
     return updated;
@@ -1026,14 +1061,20 @@ export const db = {
       if (profileStr) {
         try {
           const profile = JSON.parse(profileStr);
-          await (supabase.from('user_profiles') as any)
+          const zeroUi = typeof window !== 'undefined' ? localStorage.getItem('forma_setting_zeroui') === 'true' : false;
+          const autoOverload = typeof window !== 'undefined' ? localStorage.getItem('forma_setting_autooverload') === 'true' : true;
+
+          await (supabase.from('profiles') as any)
             .upsert({
-              user_id: user.id,
+              id: user.id,
               name: profile.name,
+              email: profile.email,
               weight: profile.weight,
               height: profile.height,
               body_fat: profile.bodyFat,
               units: profile.units || 'metric',
+              zero_ui_enabled: zeroUi,
+              auto_overload_enabled: autoOverload,
               updated_at: new Date().toISOString()
             });
         } catch (e) {}
@@ -1071,6 +1112,24 @@ export const db = {
           localStorage.setItem('forma_history', JSON.stringify(localHistory));
         } catch (e) {
           console.warn("FORMA Offline Reconcile History Error:", e);
+        }
+      }
+
+      // 3. Sync local weight history logs (weigh-ins)
+      const weightHistoryStr = localStorage.getItem('forma_weight_history');
+      if (weightHistoryStr) {
+        try {
+          const localWeightHistory: Array<{ date: string; weight: number }> = JSON.parse(weightHistoryStr);
+          for (const entry of localWeightHistory) {
+            await (supabase.from('weight_history') as any)
+              .upsert({
+                user_id: user.id,
+                date: entry.date,
+                weight: entry.weight
+              }, { onConflict: 'user_id,date' });
+          }
+        } catch (e) {
+          console.warn("FORMA Offline Weight History Sync Fallback (table may not exist):", e);
         }
       }
     } catch (e) {

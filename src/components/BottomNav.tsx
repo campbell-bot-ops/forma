@@ -29,10 +29,12 @@ export default function BottomNav({ activeTab, setActiveTab, disabled = false }:
           const isActive = activeTab === tab.id;
 
           return (
-            <button
+            <motion.button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="relative flex flex-col items-center justify-center py-1 px-3 focus:outline-none transition-colors duration-200"
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              className="relative flex flex-col items-center justify-center py-1 px-3 focus:outline-none transition-colors duration-200 cursor-pointer"
               style={{ WebkitTapHighlightColor: 'transparent' }}
             >
               {isActive && (
@@ -43,8 +45,7 @@ export default function BottomNav({ activeTab, setActiveTab, disabled = false }:
                 />
               )}
               <motion.div
-                whileTap={{ scale: 0.85 }}
-                animate={{ scale: isActive ? 1.1 : 1 }}
+                animate={{ scale: isActive ? 1.05 : 1 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 12 }}
                 className={`relative z-10 flex flex-col items-center gap-1 ${
                   isActive ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
@@ -55,7 +56,7 @@ export default function BottomNav({ activeTab, setActiveTab, disabled = false }:
                   {tab.label}
                 </span>
               </motion.div>
-            </button>
+            </motion.button>
           );
         })}
       </nav>

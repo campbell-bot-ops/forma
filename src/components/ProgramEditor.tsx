@@ -3,7 +3,50 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Trash2, Plus, ChevronUp, ChevronDown, Check, X, Edit2, Zap, Dumbbell } from 'lucide-react';
-import { WorkoutSession, Exercise } from '@/constants/workout';
+import { WorkoutSession, Exercise, GENESIS_SPLIT } from '@/constants/workout';
+
+interface PresetExercise {
+  name: string;
+  targetGroup: string;
+  defaultSets: number;
+  targetRepsRange: string;
+  baselineWeight: number; // in kg
+}
+
+const PRESET_EXERCISES: PresetExercise[] = [
+  // Chest
+  { name: 'Incline Dumbbell Press', targetGroup: 'Chest', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 32 },
+  { name: 'Flat Bench Press', targetGroup: 'Chest', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 80 },
+  { name: 'Dips (Weighted)', targetGroup: 'Chest', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 10 },
+  { name: 'Cable Crossover', targetGroup: 'Chest', defaultSets: 3, targetRepsRange: '12-15', baselineWeight: 20 },
+  // Back
+  { name: 'Weighted Pull-Ups', targetGroup: 'Back', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 10 },
+  { name: 'Lat Pulldowns', targetGroup: 'Back', defaultSets: 3, targetRepsRange: '10-12', baselineWeight: 65 },
+  { name: 'Bent Over Rows', targetGroup: 'Back', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 60 },
+  { name: 'Seated Cable Rows', targetGroup: 'Back', defaultSets: 3, targetRepsRange: '12', baselineWeight: 55 },
+  { name: 'Face Pulls', targetGroup: 'Shoulders', defaultSets: 3, targetRepsRange: '15', baselineWeight: 22.5 },
+  // Shoulders
+  { name: 'Overhead Press (Barbell)', targetGroup: 'Shoulders', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 45 },
+  { name: 'Dumbbell Shoulder Press', targetGroup: 'Shoulders', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 22 },
+  { name: 'Lateral Raises', targetGroup: 'Shoulders', defaultSets: 4, targetRepsRange: '15', baselineWeight: 12.5 },
+  // Legs
+  { name: 'Barbell Squat', targetGroup: 'Quads', defaultSets: 3, targetRepsRange: '8-10', baselineWeight: 80 },
+  { name: 'Goblet Squat', targetGroup: 'Quads', defaultSets: 3, targetRepsRange: '10-12', baselineWeight: 36 },
+  { name: 'Leg Press', targetGroup: 'Quads', defaultSets: 3, targetRepsRange: '12-15', baselineWeight: 160 },
+  { name: 'Leg Extensions', targetGroup: 'Quads', defaultSets: 3, targetRepsRange: '15', baselineWeight: 45 },
+  { name: 'Romanian Deadlifts', targetGroup: 'Hamstrings', defaultSets: 3, targetRepsRange: '10-12', baselineWeight: 90 },
+  { name: 'Leg Curls', targetGroup: 'Hamstrings', defaultSets: 3, targetRepsRange: '12-15', baselineWeight: 45 },
+  { name: 'Walking Lunges', targetGroup: 'Quads / Glutes', defaultSets: 3, targetRepsRange: '12', baselineWeight: 16 },
+  // Arms
+  { name: 'Bicep Curls (Dumbbell)', targetGroup: 'Arms', defaultSets: 3, targetRepsRange: '12', baselineWeight: 16 },
+  { name: 'Hammer Curls', targetGroup: 'Arms', defaultSets: 3, targetRepsRange: '12', baselineWeight: 14 },
+  { name: 'Tricep Overhead Extensions', targetGroup: 'Arms', defaultSets: 3, targetRepsRange: '12', baselineWeight: 24 },
+  { name: 'Tricep Pushdowns', targetGroup: 'Arms', defaultSets: 3, targetRepsRange: '12', baselineWeight: 25 },
+  // Core
+  { name: 'Hanging Leg Raises', targetGroup: 'Core', defaultSets: 3, targetRepsRange: '12-15', baselineWeight: 0 },
+  { name: 'Plank', targetGroup: 'Core', defaultSets: 3, targetRepsRange: '60s', baselineWeight: 0 },
+  { name: 'Weighted Russian Twists', targetGroup: 'Core', defaultSets: 3, targetRepsRange: '20', baselineWeight: 10 }
+];
 
 interface ProgramEditorProps {
   sessions: WorkoutSession[];
@@ -419,6 +462,33 @@ export default function ProgramEditor({
                   </button>
                 </div>
 
+                {/* Preset Dropdown Selector */}
+                <div className="border-b border-white/5 pb-3">
+                  <label className="text-[8px] text-zinc-500 uppercase font-bold tracking-wider mb-1 block">Or Load Preset</label>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const preset = PRESET_EXERCISES.find(p => p.name === e.target.value);
+                      if (preset) {
+                        setExName(preset.name);
+                        setExTargetGroup(preset.targetGroup);
+                        setExDefaultSets(preset.defaultSets);
+                        setExTargetReps(preset.targetRepsRange);
+                        const weightInUserUnits = isImperial ? preset.baselineWeight * 2.20462 : preset.baselineWeight;
+                        setExBaselineWeight(parseFloat(weightInUserUnits.toFixed(1)));
+                      }
+                    }}
+                    className="w-full bg-[#1c1c1e] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                  >
+                    <option value="">-- Load Preset Movement --</option>
+                    {PRESET_EXERCISES.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name} ({p.targetGroup})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Name & Target Group */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -597,6 +667,23 @@ export default function ProgramEditor({
             : 'CNS Recharge rest day session. Complete standard recovery checklists (no weights/exercises needed).'}
         </div>
       )}
+
+      {/* Reset Program Split Footer Section */}
+      <div className="mt-8 border-t border-white/5 pt-6 flex flex-col gap-2">
+        <button
+          onClick={() => {
+            if (confirm('Reset your entire training program split to default ("Genesis Split")? This will overwrite any custom movements.')) {
+              const defaultSessions = JSON.parse(JSON.stringify(GENESIS_SPLIT));
+              setLocalSessions(defaultSessions);
+              setSelectedSessionId(defaultSessions[0]?.id || '');
+              resetForm();
+            }
+          }}
+          className="py-3 border border-red-950/20 bg-red-950/5 hover:bg-red-950/15 text-[10px] text-red-400 font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
+        >
+          Reset Split to Default
+        </button>
+      </div>
     </div>
   );
 }

@@ -61,7 +61,8 @@ export default function Home() {
     loginSuccess,
     triggerHaptic,
     showOnboarding,
-    setShowOnboarding
+    setShowOnboarding,
+    isOnline
   } = useApp();
 
   const [prevTab, setPrevTab] = useState<TabId>('horizon');
@@ -158,6 +159,29 @@ export default function Home() {
 
   return (
     <div className="bg-obsidian min-h-screen w-full text-foreground relative flex flex-col">
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            className="fixed top-4 left-1/2 z-[100] flex items-center gap-2.5 px-4 py-2 rounded-full border border-orange-500/30 bg-zinc-950/80 backdrop-blur-md shadow-lg shadow-orange-950/10 pointer-events-none"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+            </span>
+            <span className="text-[10px] font-bold tracking-widest text-zinc-300 uppercase font-mono">
+              Offline Mode
+            </span>
+            <span className="text-[8px] tracking-wider text-zinc-500 uppercase font-mono border-l border-white/10 pl-2">
+              Local Storage Active
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {showLoading ? (
           <LoadingScreen key="loading" onFinished={() => {

@@ -239,6 +239,13 @@ export default function ProfileView() {
   };
 
   const coords = getSvgCoordinates();
+
+  // Recomposition target weight: 10% body fat
+  const bodyFatFraction = (userProfile.bodyFat || 12) / 100;
+  const leanMassKg = userProfile.weight * (1 - bodyFatFraction);
+  const targetWeightKg = leanMassKg / 0.90; 
+  const targetWeight = isImperial ? targetWeightKg * 2.20462 : targetWeightKg;
+  const targetY = chartHeight - paddingY - ((targetWeight - minW) / rangeW) * (chartHeight - paddingY * 2);
   
   // Construct paths
   let linePath = '';
@@ -258,8 +265,6 @@ export default function ProfileView() {
     : `${userProfile.height} cm`;
 
   // Advanced Biophysical Calculations
-  const bodyFatFraction = (userProfile.bodyFat || 12) / 100;
-  const leanMassKg = userProfile.weight * (1 - bodyFatFraction);
   const heightMeters = userProfile.height / 100;
   
   const ffmi = heightMeters > 0 ? (leanMassKg / Math.pow(heightMeters, 2)) : 0;
@@ -393,10 +398,22 @@ export default function ProfileView() {
             {/* Sparkline Chart */}
             {chartPoints.length > 0 ? (
               <div className="relative w-full h-[80px] bg-black/10 rounded-2xl border border-white/5 overflow-visible">
-                {/* Tooltip Overlay */}
-                {activeHoverIdx !== null && chartPoints[activeHoverIdx] && (
-                  <div className="absolute top-1 left-2 bg-black/90 border border-white/10 rounded px-2 py-0.5 text-[8px] font-mono text-cyan-400 z-10 pointer-events-none">
-                    {new Date(chartPoints[activeHoverIdx].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: {chartPoints[activeHoverIdx].weight.toFixed(1)} {isImperial ? 'lbs' : 'kg'}
+                {/* Floating Tooltip Overlay */}
+                {activeHoverIdx !== null && chartPoints[activeHoverIdx] && coords[activeHoverIdx] && (
+                  <div 
+                    className="absolute bg-zinc-950/95 border border-white/15 rounded-lg px-2 py-1 text-[8px] font-mono text-cyan-400 z-10 pointer-events-none shadow-xl flex flex-col items-center leading-tight min-w-[70px]"
+                    style={{
+                      left: `${(coords[activeHoverIdx].x / chartWidth) * 100}%`,
+                      top: `${coords[activeHoverIdx].y - 32}px`,
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    <span className="text-[6px] text-zinc-500 font-bold">
+                      {new Date(chartPoints[activeHoverIdx].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className="font-bold text-white mt-0.5">
+                      {chartPoints[activeHoverIdx].weight.toFixed(1)} {isImperial ? 'lbs' : 'kg'}
+                    </span>
                   </div>
                 )}
                 <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
@@ -409,6 +426,34 @@ export default function ProfileView() {
                   
                   {/* Grid lines */}
                   <line x1="0" y1={chartHeight / 2} x2={chartWidth} y2={chartHeight / 2} stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+                  
+                  {/* Recomposition Target line */}
+                  {targetWeight >= minW && targetWeight <= maxW && (
+                    <>
+                      <line 
+                        x1="0" 
+                        y1={targetY} 
+                        x2={chartWidth} 
+                        y2={targetY} 
+                        stroke="#ffaa00" 
+                        strokeWidth="0.8" 
+                        strokeDasharray="2 3" 
+                        opacity="0.35" 
+                      />
+                      <text 
+                        x={chartWidth - 5} 
+                        y={targetY - 3} 
+                        fill="#ffaa00" 
+                        fontSize="5.5" 
+                        textAnchor="end" 
+                        opacity="0.5" 
+                        fontFamily="monospace"
+                        fontWeight="bold"
+                      >
+                        RECOMP TARGET ({targetWeight.toFixed(1)} {isImperial ? 'lbs' : 'kg'})
+                      </text>
+                    </>
+                  )}
                   
                   {/* Area fill */}
                   {areaPath && <path d={areaPath} fill="url(#weight-gradient)" />}
