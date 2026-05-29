@@ -21,6 +21,7 @@ import ShareCardModal from '@/components/ShareCardModal';
 import CnsSurveyModal from '@/components/CnsSurveyModal';
 import ProgramEditor from '@/components/ProgramEditor';
 import OnboardingView from '@/components/OnboardingView';
+import LandingPageView from '@/components/LandingPageView';
 
 export default function Home() {
   const {
@@ -68,6 +69,7 @@ export default function Home() {
   } = useApp();
 
   const [prevTab, setPrevTab] = useState<TabId>('horizon');
+  const [showAuthForm, setShowAuthForm] = useState(false);
 
   // Update previous tab index for directional sliding transitions
   useEffect(() => {
@@ -207,13 +209,17 @@ export default function Home() {
           </motion.div>
         ) : user === null ? (
           <motion.div
-            key="auth-flow"
+            key={showAuthForm ? "auth-flow" : "landing"}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="w-full h-full flex flex-col justify-center items-center"
+            className="w-full min-h-screen flex flex-col"
           >
-            <SignInView onSuccess={loginSuccess} />
+            {showAuthForm ? (
+              <SignInView onSuccess={loginSuccess} onBack={() => setShowAuthForm(false)} />
+            ) : (
+              <LandingPageView onEnterCrucible={() => setShowAuthForm(true)} />
+            )}
           </motion.div>
         ) : (
           <motion.div

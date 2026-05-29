@@ -4,14 +4,15 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db } from '@/utils/db';
 import { UserSession } from '@/types/workout';
-import { Mail, Lock, ShieldAlert, CheckCircle2, ArrowRight, User, Dumbbell, Ruler, Percent } from 'lucide-react';
+import { Mail, Lock, ShieldAlert, CheckCircle2, ArrowRight, ArrowLeft, User, Dumbbell, Ruler, Percent } from 'lucide-react';
 import Image from 'next/image';
 
 interface SignInViewProps {
   onSuccess: (session: UserSession) => void;
+  onBack?: () => void;
 }
 
-export default function SignInView({ onSuccess }: SignInViewProps) {
+export default function SignInView({ onSuccess, onBack }: SignInViewProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   
   // Credentials states
@@ -77,6 +78,14 @@ export default function SignInView({ onSuccess }: SignInViewProps) {
         transition={{ type: 'spring', stiffness: 220, damping: 22 }}
         className="w-full relative z-10"
       >
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="absolute -top-12 left-0 flex items-center gap-1.5 text-zinc-500 hover:text-white text-[10px] font-extrabold uppercase tracking-widest transition-colors cursor-pointer"
+          >
+            <ArrowLeft size={12} /> Back
+          </button>
+        )}
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center mb-8">
           <Image
@@ -86,7 +95,7 @@ export default function SignInView({ onSuccess }: SignInViewProps) {
             height={28}
             priority
             style={{ height: 'auto' }}
-            className="h-7 w-auto object-contain mb-2"
+            className="h-5 md:h-6 w-auto object-contain mb-2"
           />
           <p className="text-[9px] tracking-[0.3em] text-zinc-500 uppercase font-semibold">
             Workout Tracker

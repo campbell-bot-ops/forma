@@ -41,6 +41,14 @@
   --font-weight-bold: 600;
   --font-weight-extrabold: 700;
   --font-weight-black: 800;
+
+  --animate-scan: scan 8s ease-in-out infinite;
+
+  @keyframes scan {
+    0% { top: 0%; opacity: 0; }
+    10%, 90% { opacity: 0.45; }
+    100% { top: 100%; opacity: 0; }
+  }
 }
 
 :root {
@@ -217,4 +225,60 @@ html.lenis body {
 
 .lenis.lenis-smooth iframe {
   pointer-events: none;
+}
+
+/* === Landing Page Animations === */
+
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+
+@keyframes float-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -25px) scale(1.08); }
+  66% { transform: translate(-20px, 18px) scale(0.95); }
+}
+
+@keyframes float-drift-alt {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-28px, 22px) scale(0.92); }
+  66% { transform: translate(18px, -30px) scale(1.06); }
+}
+
+.animate-float-drift {
+  animation: float-drift 20s ease-in-out infinite;
+}
+
+.animate-float-drift-alt {
+  animation: float-drift-alt 25s ease-in-out infinite;
+}
+
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%) skewX(-15deg);
+  animation: shimmer-sweep 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(6, 182, 212, 0.05); }
+  50% { box-shadow: 0 0 40px rgba(6, 182, 212, 0.15); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
 }

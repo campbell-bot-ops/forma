@@ -531,7 +531,7 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
           height={28}
           priority
           style={{ height: 'auto' }}
-          className={`h-7 w-auto object-contain animate-fade-in ${theme === 'light' ? 'invert' : ''}`}
+          className={`h-5 md:h-6 w-auto object-contain animate-fade-in ${theme === 'light' ? 'invert' : ''}`}
         />
         <div className="w-16" />
       </div>
@@ -1402,11 +1402,11 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
             <Image
               src="/Frame 166.png"
               alt="FORMA Logo"
-              width={70}
-              height={16}
+              width={120}
+              height={28}
               priority
               style={{ height: 'auto' }}
-              className="h-4 w-auto object-contain"
+              className="h-5 md:h-6 w-auto object-contain"
             />
             <span className="text-[10px] text-zinc-500 font-mono border-l border-white/10 pl-2">
               {todayWorkout?.title}

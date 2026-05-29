@@ -12,9 +12,9 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "FORMA — Performance Architecture",
-  description: "Precision Recomposition for the Creative Class. Minimalist, auto-regulated overload engine.",
-  keywords: ["Fitness", "Minimalist Workout", "Genesis Split", "Hypertrophy", "Creative Class", "Forma"],
+  title: "FORMA — Premium Workout Ledger & Autonomic Recovery Tracker",
+  description: "Track training volume tonnage, calculate CNS fatigue, and automate progressive overload. An offline-first, zero-fluff training ledger designed for serious lifters.",
+  keywords: ["Fitness", "Progressive Overload", "CNS Readiness", "1RM Calculator", "Tonnage Tracking", "Bodybuilding", "Powerlifting", "Genesis Split", "Forma"],
   authors: [{ name: "FORMA Team" }],
   manifest: "/manifest.json",
   appleWebApp: {
@@ -22,6 +22,18 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "FORMA",
   },
+  openGraph: {
+    title: "FORMA — The Sports Science Workout Ledger",
+    description: "Calibrate your training weight by CNS readiness, track hybrid 1RM metrics, and log sets with a premium, zero-distraction dark glassmorphic layout.",
+    url: "https://forma.dev",
+    siteName: "FORMA",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FORMA — Calibrated Strength Ledger",
+    description: "Autonomic recovery tracking meets automated progressive overload. Log workouts offline with zero distraction.",
+  }
 };
 
 export const viewport: Viewport = {
