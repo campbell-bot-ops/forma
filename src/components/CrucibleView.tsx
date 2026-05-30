@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { WorkoutSession, Exercise, LoggedSet } from '@/constants/workout';
+import { WorkoutSession, Exercise, LoggedSet, computeEstimated1RM } from '@/constants/workout';
 import { ArrowLeft, Check, Timer, ArrowRight, Zap, RefreshCw, CheckCircle2, Dumbbell, Minus, Plus, Flame } from 'lucide-react';
 import ExerciseHistoryModal from '@/components/ExerciseHistoryModal';
 import { useApp } from '@/context/AppContext';
@@ -10,7 +10,7 @@ import { useApp } from '@/context/AppContext';
 interface CrucibleViewProps {
   session: WorkoutSession;
   onBack: () => void;
-  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }, duration: number, notes?: string, tags?: string[]) => void;
+  onFinishWorkout: (logs: { [exId: string]: LoggedSet[] }, duration: number, notes?: string, tags?: string[], extraCardio?: any) => void;
   zeroUiEnabled: boolean;
   autoOverloadEnabled: boolean;
   onUpdateWeight: (exerciseId: string, newWeight: number) => void;
@@ -58,21 +58,178 @@ export default function CrucibleView({
   units,
   workoutHistory = []
 }: CrucibleViewProps) {
-  const { triggerHaptic } = useApp();
+  const { triggerHaptic, showToast } = useApp();
   const [currentExerciseIdx, setCurrentExerciseIdx] = useState(0);
   const [currentSetIdx, setCurrentSetIdx] = useState(0);
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
-  
-  const currentExercise = session.exercises[currentExerciseIdx];
-  const totalSets = currentExercise.defaultSets;
-  const ghostSet = currentExercise.ghostSets[currentSetIdx] || currentExercise.ghostSets[currentExercise.ghostSets.length - 1];
+  const [brokenPrs, setBrokenPrs] = useState<string[]>([]);
+
+  // Deload Mode State
+  const [deloadModeActive, setDeloadModeActive] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setDeloadModeActive(localStorage.getItem('forma_deload_mode') === 'true');
+    }
+  }, []);
+
+  const dummyGhostSet = { weight: 0, reps: 0, rpe: 8 };
+
+  const getScaledGhostSet = (originalSet: any) => {
+    if (!originalSet) return dummyGhostSet;
+    if (!deloadModeActive) return originalSet;
+    return {
+      ...originalSet,
+      weight: originalSet.weight * 0.8,
+      reps: Math.min(originalSet.reps, 8),
+      rpe: Math.min(originalSet.rpe, 7.0)
+    };
+  };
+
+  const currentExercise = session?.exercises?.[currentExerciseIdx];
+  const totalSets = currentExercise?.defaultSets || 0;
+  const ghostSet = currentExercise
+    ? getScaledGhostSet(currentExercise.ghostSets[currentSetIdx] || currentExercise.ghostSets[currentExercise.ghostSets.length - 1])
+    : dummyGhostSet;
+
+  // Heart Rate Monitor & Calorie state variables
+  const [heartRate, setHeartRate] = useState<number | null>(null);
+  const [hrmConnected, setHrmConnected] = useState(false);
+  const [caloriesBurned, setCaloriesBurned] = useState(0);
+  const [isSimulatedHrm, setIsSimulatedHrm] = useState(false);
+  const [bluetoothSupported, setBluetoothSupported] = useState(false);
+  const hrmDeviceRef = useRef<any>(null);
+  const hrmCharRef = useRef<any>(null);
+  const heartRatesList = useRef<number[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setBluetoothSupported(!!(navigator as any).bluetooth);
+    }
+  }, []);
+
+  // Update Bluetooth Support check if navigator or user changes
+  useEffect(() => {
+    if (heartRate !== null && heartRate > 0) {
+      heartRatesList.current.push(heartRate);
+    }
+  }, [heartRate]);
+
+  const connectHrm = async () => {
+    if (!(navigator as any).bluetooth) {
+      showToast("Web Bluetooth is not supported in this browser.");
+      return;
+    }
+    try {
+      showToast("Searching for heart rate monitors...");
+      const device = await (navigator as any).bluetooth.requestDevice({
+        filters: [{ services: ['heart_rate'] }]
+      });
+      hrmDeviceRef.current = device;
+      
+      const server = await device.gatt?.connect();
+      const service = await server?.getPrimaryService('heart_rate');
+      const characteristic = await service?.getCharacteristic('heart_rate_measurement');
+      hrmCharRef.current = characteristic;
+
+      await characteristic?.startNotifications();
+      characteristic?.addEventListener('characteristicvaluechanged', handleHrmValue);
+      
+      setHrmConnected(true);
+      setIsSimulatedHrm(false);
+      showToast("Heart Rate Monitor connected!");
+
+      device.addEventListener('gattserverdisconnected', onHrmDisconnected);
+    } catch (err: any) {
+      console.error("Bluetooth connection error:", err);
+      showToast(`Connection failed: ${err.message || err}`);
+    }
+  };
+
+  const handleHrmValue = (event: any) => {
+    const value = event.target.value;
+    const flags = value.getUint8(0);
+    const isUint16 = (flags & 0x01) !== 0;
+    let bpm = 0;
+    if (isUint16) {
+      bpm = value.getUint16(1, true);
+    } else {
+      bpm = value.getUint8(1);
+    }
+    setHeartRate(bpm);
+  };
+
+  const onHrmDisconnected = () => {
+    setHrmConnected(false);
+    setHeartRate(null);
+    showToast("HRM disconnected");
+  };
+
+  const disconnectHrm = async () => {
+    if (hrmCharRef.current) {
+      try {
+        await hrmCharRef.current.stopNotifications();
+      } catch (e) {}
+    }
+    if (hrmDeviceRef.current && hrmDeviceRef.current.gatt?.connected) {
+      hrmDeviceRef.current.gatt.disconnect();
+    }
+    setHrmConnected(false);
+    setHeartRate(null);
+    setIsSimulatedHrm(false);
+    showToast("HRM disconnected");
+  };
+
+  const startSimulatedHrm = () => {
+    setIsSimulatedHrm(true);
+    setHrmConnected(true);
+    setHeartRate(75);
+    showToast("Simulated HRM active");
+  };
+
+  const getAverageHeartRate = () => {
+    if (heartRatesList.current.length === 0) return undefined;
+    const sum = heartRatesList.current.reduce((a, b) => a + b, 0);
+    return Math.round(sum / heartRatesList.current.length);
+  };
 
   // Progressive Overload calculations
-  const lastSessionLog = workoutHistory?.find(h => h.sessionId === session.id);
-  const prevExerciseSets = lastSessionLog?.logs?.[currentExercise.id];
+  const lastSessionLog = workoutHistory?.find(h => h.sessionId === session?.id);
+  const prevExerciseSets = currentExercise ? lastSessionLog?.logs?.[currentExercise.id] : undefined;
   const prevBestSet = prevExerciseSets && prevExerciseSets.length > 0
     ? [...prevExerciseSets].sort((a: any, b: any) => b.weight - a.weight || b.reps - a.reps)[0]
     : null;
+
+  // All-time PR calculations
+  const allTimeBestSet = React.useMemo(() => {
+    if (!currentExercise) return { maxWeightSet: null, maxEst1RMSet: null };
+    let maxWeight = 0;
+    let maxEst1RM = 0;
+    let maxWeightSet: any = null;
+    let maxEst1RMSet: any = null;
+
+    workoutHistory?.forEach((h: any) => {
+      const sets = h.logs?.[currentExercise.id];
+      if (Array.isArray(sets)) {
+        sets.forEach((set: any) => {
+          if (set.isWarmup) return;
+          const weight = set.weight || 0;
+          const reps = set.reps || 0;
+          const est1RM = computeEstimated1RM(weight, reps);
+          
+          if (weight > maxWeight) {
+            maxWeight = weight;
+            maxWeightSet = { ...set, date: h.date };
+          }
+          if (est1RM > maxEst1RM) {
+            maxEst1RM = est1RM;
+            maxEst1RMSet = { ...set, date: h.date, est1RM };
+          }
+        });
+      }
+    });
+
+    return { maxWeightSet, maxEst1RMSet };
+  }, [workoutHistory, currentExercise?.id]);
 
   const [showOverloadGlow, setShowOverloadGlow] = useState(false);
 
@@ -113,9 +270,56 @@ export default function CrucibleView({
   const [workoutNotes, setWorkoutNotes] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
+  // Calorie burn logic
+  useEffect(() => {
+    if (elapsedTime <= 0) return;
+    
+    // Weight in kg (default 78.4)
+    const weightKg = units === 'imperial' ? (parseFloat(weight) || 78.4) / 2.20462 : (parseFloat(weight) || 78.4);
+    
+    setCaloriesBurned(prev => {
+      const durationMins = 1 / 60;
+      if (hrmConnected && heartRate) {
+        // Men calorie model (Alexander Thorne is male, default model)
+        const hrFactor = 0.6309 * heartRate + 0.1988 * weightKg - 0.2017 * 28 - 55.0969;
+        const calPerMin = Math.max(0, hrFactor / 4.184);
+        return prev + calPerMin * durationMins;
+      } else {
+        // METs = 6.0: 0.105 * weightKg * durationMins
+        const calPerMin = 6.0 * 3.5 * weightKg / 200;
+        return prev + calPerMin * durationMins;
+      }
+    });
+  }, [elapsedTime, hrmConnected, heartRate, units, weight]);
+
+  // Simulated HRM Fluctuation
+  useEffect(() => {
+    if (!isSimulatedHrm || !hrmConnected) return;
+
+    const interval = setInterval(() => {
+      setHeartRate(prev => {
+        if (prev === null) return 75;
+        if (timerActive) {
+          const target = 75;
+          const diff = target - prev;
+          const step = Math.sign(diff) * (Math.random() > 0.5 ? 1 : 0);
+          return Math.max(70, Math.min(160, prev + step + (Math.random() > 0.7 ? (Math.random() > 0.5 ? 1 : -1) : 0)));
+        } else {
+          const target = 80 + rpe * 7;
+          const diff = target - prev;
+          const step = Math.sign(diff) * (Math.random() > 0.4 ? 2 : 1);
+          return Math.max(70, Math.min(160, prev + step + (Math.random() > 0.7 ? (Math.random() > 0.5 ? 1 : -1) : 0)));
+        }
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isSimulatedHrm, hrmConnected, timerActive, rpe]);
+
   // Zero-UI Input Prediction sync
   useEffect(() => {
-    const activeGhost = currentExercise.ghostSets[currentSetIdx] || currentExercise.ghostSets[currentExercise.ghostSets.length - 1];
+    if (!currentExercise || !currentExercise.ghostSets || currentExercise.ghostSets.length === 0) return;
+    const activeGhost = getScaledGhostSet(currentExercise.ghostSets[currentSetIdx] || currentExercise.ghostSets[currentExercise.ghostSets.length - 1]);
     if (zeroUiEnabled) {
       const scaledWeight = activeGhost.weight * cnsScale;
       const displayWeight = units === 'imperial' 
@@ -129,9 +333,10 @@ export default function CrucibleView({
       setRpe(activeGhost.rpe);
       setWeight('');
     }
-  }, [currentExerciseIdx, currentSetIdx, zeroUiEnabled, currentExercise, cnsScale, units]);
+  }, [currentExerciseIdx, currentSetIdx, zeroUiEnabled, currentExercise, cnsScale, units, deloadModeActive]);
 
   const advanceWorkflow = () => {
+    if (!session?.exercises || session.exercises.length === 0) return;
     if (currentSetIdx < totalSets - 1) {
       setCurrentSetIdx(prev => prev + 1);
     } else {
@@ -156,7 +361,7 @@ export default function CrucibleView({
   // Timer effect
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
-    if (timerActive) {
+    if (timerActive && currentExercise) {
       intervalId = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
@@ -175,7 +380,7 @@ export default function CrucibleView({
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [timerActive, currentExercise, customRestTimes]);
+  }, [timerActive, currentExercise, customRestTimes, triggerHaptic]);
 
   // Global elapsed workout timer effect
   useEffect(() => {
@@ -184,6 +389,21 @@ export default function CrucibleView({
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  if (!session || !session.exercises || session.exercises.length === 0 || !currentExercise) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-obsidian text-zinc-400">
+        <Dumbbell className="text-zinc-600 mb-4 animate-bounce" size={48} />
+        <h3 className="text-lg font-bold text-white mb-2">No Exercises Defined</h3>
+        <p className="text-xs text-zinc-500 mb-6 text-center max-w-xs">
+          This workout session does not contain any exercises or is loading.
+        </p>
+        <button onClick={onBack} className="px-6 py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer">
+          Go Back
+        </button>
+      </div>
+    );
+  }
 
   const handleLogSet = () => {
     const parsedInputWeight = parseFloat(weight) || 0;
@@ -207,7 +427,51 @@ export default function CrucibleView({
       }
     }
 
-    if (achievedOverload) {
+    // Check All-Time PR achievement
+    let achievedPR = false;
+    let prType: 'weight' | '1rm' | 'both' | null = null;
+    if (!isWarmup && parsedReps > 0 && weightInKg > 0 && allTimeBestSet.maxWeightSet) {
+      const currentEst1RM = computeEstimated1RM(weightInKg, parsedReps);
+      const allTimeWeight = allTimeBestSet.maxWeightSet.weight;
+      const allTimeEst1RM = allTimeBestSet.maxEst1RMSet ? allTimeBestSet.maxEst1RMSet.est1RM : 0;
+      
+      const brokeWeight = weightInKg > allTimeWeight + 0.05;
+      const broke1RM = currentEst1RM > allTimeEst1RM + 0.05;
+      
+      if (brokeWeight && broke1RM) {
+        achievedPR = true;
+        prType = 'both';
+      } else if (brokeWeight) {
+        achievedPR = true;
+        prType = 'weight';
+      } else if (broke1RM) {
+        achievedPR = true;
+        prType = '1rm';
+      }
+    }
+
+    if (achievedPR) {
+      setShowOverloadGlow(true);
+      triggerHaptic([30, 80, 30, 80, 30]); // special long haptic rhythm for all-time PR
+      
+      const prWeightText = units === 'imperial'
+        ? `${Math.round(parsedInputWeight)} lbs`
+        : `${weightInKg.toFixed(1)} kg`;
+        
+      if (prType === 'both' || prType === 'weight') {
+        showToast(`🏆 ALL-TIME PR! ${currentExercise.name}: ${prWeightText}`);
+      } else {
+        const est1RMText = units === 'imperial'
+          ? `${Math.round(computeEstimated1RM(weightInKg, parsedReps) * 2.20462)} lbs`
+          : `${computeEstimated1RM(weightInKg, parsedReps).toFixed(1)} kg`;
+        showToast(`🏆 NEW EST. 1RM RECORD! ${currentExercise.name}: ${est1RMText}`);
+      }
+      
+      if (!brokenPrs.includes(currentExercise.name)) {
+        setBrokenPrs(prev => [...prev, currentExercise.name]);
+      }
+      setTimeout(() => setShowOverloadGlow(false), 2500);
+    } else if (achievedOverload) {
       setShowOverloadGlow(true);
       triggerHaptic([30, 50, 30]); // double vibrate on PR milestone
       setTimeout(() => setShowOverloadGlow(false), 2200);
@@ -379,6 +643,14 @@ export default function CrucibleView({
 
   return (
     <div className={`min-h-screen relative flex flex-col pt-6 pb-36 px-4 max-w-md mx-auto transition-colors duration-500 overflow-hidden ${timerActive ? 'animate-rest-pulse' : 'bg-obsidian'}`}>
+      <style>{`
+        @keyframes heartbeat {
+          0%, 100% { transform: scale(1); }
+          25% { transform: scale(1.15); }
+          40% { transform: scale(1.02); }
+          60% { transform: scale(1.12); }
+        }
+      `}</style>
       
       {/* RPE Ambient Exertion Pulse */}
       {!timerActive && (
@@ -468,6 +740,74 @@ export default function CrucibleView({
             </button>
           );
         })}
+      </div>
+
+      {/* Deload Mode Active Banner */}
+      {deloadModeActive && (
+        <div className="mb-4 px-4 py-2.5 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-cyan-400 text-center font-bold text-[9px] tracking-wider uppercase animate-pulse relative z-10 flex items-center justify-center gap-1.5">
+          <Zap size={11} className="fill-cyan-400/20 animate-bounce" />
+          <span>Deload Mode Active — Targets scaled down by 20%</span>
+        </div>
+      )}
+
+      {/* Heart Rate / Bluetooth Sync Indicator */}
+      <div className="mb-4 glass-panel rounded-2xl p-3 border border-white/5 flex items-center justify-between relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white/5">
+            <Flame 
+              size={16} 
+              className={`${hrmConnected && heartRate ? 'text-red-500 fill-red-500/20' : 'text-zinc-500'}`}
+              style={{
+                animation: hrmConnected && heartRate 
+                  ? `heartbeat ${60 / heartRate}s infinite ease-in-out` 
+                  : 'none'
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-[8px] uppercase tracking-wider text-zinc-500 font-bold font-mono">
+              Heart Rate Tracker
+            </div>
+            <div className="text-[11px] font-bold text-white leading-tight">
+              {hrmConnected && heartRate ? (
+                <span>
+                  {heartRate} <span className="text-[8px] font-mono text-zinc-500 font-normal">BPM</span>
+                  <span className="mx-1.5 text-zinc-600">&bull;</span>
+                  {Math.round(caloriesBurned)} <span className="text-[8px] font-mono text-zinc-500 font-normal">KCAL</span>
+                </span>
+              ) : (
+                <span className="text-zinc-500">Not Connected ({Math.round(caloriesBurned)} kcal)</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-1.5">
+          {hrmConnected ? (
+            <button
+              onClick={disconnectHrm}
+              className="px-2.5 py-1 rounded bg-red-950/20 border border-red-900/30 text-[9px] font-extrabold uppercase tracking-wider text-red-400 cursor-pointer transition-all hover:bg-red-950/40 active:scale-95"
+            >
+              Disconnect
+            </button>
+          ) : (
+            <>
+              {bluetoothSupported && (
+                <button
+                  onClick={connectHrm}
+                  className="px-2.5 py-1 rounded bg-white/5 border border-white/10 hover:bg-white/10 text-[9px] font-extrabold uppercase tracking-wider text-zinc-300 hover:text-white cursor-pointer transition-all active:scale-95"
+                >
+                  Sync Sensor
+                </button>
+              )}
+              <button
+                onClick={startSimulatedHrm}
+                className="px-2.5 py-1 rounded bg-[#3b82f6]/10 border border-[#3b82f6]/20 hover:bg-[#3b82f6]/20 text-[9px] font-extrabold uppercase tracking-wider text-[#60a5fa] cursor-pointer transition-all active:scale-95"
+              >
+                Simulate HR
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Overload Alert Notification */}
@@ -681,6 +1021,11 @@ export default function CrucibleView({
                         Prev: {units === 'imperial' ? `${(prevBestSet.weight * 2.20462).toFixed(1)} lbs` : `${prevBestSet.weight} kg`}
                       </span>
                     )}
+                    {allTimeBestSet.maxWeightSet && (
+                      <span className="text-[9px] text-amber-400/90 font-medium font-mono">
+                        PR: {units === 'imperial' ? `${(allTimeBestSet.maxWeightSet.weight * 2.20462).toFixed(1)} lbs` : `${allTimeBestSet.maxWeightSet.weight} kg`} x {allTimeBestSet.maxWeightSet.reps}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -730,6 +1075,11 @@ export default function CrucibleView({
                     {prevBestSet && (
                       <span className="text-[9px] text-emerald-400/80 font-medium font-mono">
                         Prev: {prevBestSet.reps} reps
+                      </span>
+                    )}
+                    {allTimeBestSet.maxEst1RMSet && (
+                      <span className="text-[9px] text-cyan-400/90 font-medium font-mono">
+                        PR 1RM: {units === 'imperial' ? `${Math.round(allTimeBestSet.maxEst1RMSet.est1RM * 2.20462)} lbs` : `${allTimeBestSet.maxEst1RMSet.est1RM.toFixed(1)} kg`}
                       </span>
                     )}
                   </div>
@@ -1055,7 +1405,12 @@ export default function CrucibleView({
                 <button
                   onClick={() => {
                     setShowEndConfirm(false);
-                    onFinishWorkout(workoutLogs, elapsedTime, workoutNotes, selectedTags);
+                    const finalTags = [...selectedTags, ...brokenPrs.map(exName => `🏆 PR: ${exName}`)];
+                    const avgHr = getAverageHeartRate();
+                    const extraCardio = avgHr 
+                      ? { avgHeartRate: avgHr, caloriesBurned: Math.round(caloriesBurned) } 
+                      : { caloriesBurned: Math.round(caloriesBurned) };
+                    onFinishWorkout(workoutLogs, elapsedTime, workoutNotes, finalTags, extraCardio);
                   }}
                   className="flex-1 py-3 bg-white hover:bg-zinc-200 text-black text-xs font-bold rounded-xl transition-all cursor-pointer active-glow"
                 >

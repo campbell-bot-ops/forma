@@ -95,26 +95,45 @@ function getMonday(d: Date) {
   return monday;
 }
 
-const exerciseMuscleMapping: Record<string, string> = {
-  'incline-db-press': 'Chest',
-  'flat-bench-press': 'Chest',
-  'lat-pulldowns': 'Back',
-  'seated-cable-rows': 'Back',
-  'bent-over-rows': 'Back',
-  'face-pulls': 'Shoulders',
-  'overhead-press': 'Shoulders',
-  'lateral-raises': 'Shoulders',
-  'bicep-curls-db': 'Arms',
-  'tricep-overhead-extensions': 'Arms',
-  'goblet-squat': 'Quads',
-  'leg-press': 'Quads',
-  'leg-extensions': 'Quads',
-  'walking-lunges': 'Quads',
-  'romanian-deadlifts': 'Hamstrings',
-  'leg-curls': 'Hamstrings',
-  'hanging-leg-raises': 'Core',
-  'planks': 'Core',
-  'weighted-russian-twists': 'Core'
+const exerciseTargets: Record<string, Record<string, number>> = {
+  'incline-db-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
+  'flat-bench-press': { Chest: 1.0, Shoulders: 0.3, Arms: 0.2 },
+  'lat-pulldowns': { Back: 1.0, Arms: 0.3 },
+  'seated-cable-rows': { Back: 1.0, Arms: 0.3 },
+  'bent-over-rows': { Back: 1.0, Arms: 0.3 },
+  'face-pulls': { Back: 0.5, Shoulders: 0.5 },
+  'overhead-press': { Shoulders: 1.0, Arms: 0.2 },
+  'lateral-raises': { Shoulders: 1.0 },
+  'bicep-curls-db': { Arms: 1.0 },
+  'tricep-overhead-extensions': { Arms: 1.0 },
+  'goblet-squat': { Quads: 1.0, Core: 0.3 },
+  'leg-press': { Quads: 0.8, Hamstrings: 0.2 },
+  'leg-extensions': { Quads: 1.0 },
+  'walking-lunges': { Quads: 0.6, Hamstrings: 0.4 },
+  'romanian-deadlifts': { Hamstrings: 1.0, Core: 0.3 },
+  'leg-curls': { Hamstrings: 1.0 },
+  'hanging-leg-raises': { Core: 1.0 },
+  'planks': { Core: 1.0 },
+  'weighted-russian-twists': { Core: 1.0 }
+};
+
+const resolveExerciseTargets = (exId: string, allSessions: any[]): Record<string, number> => {
+  if (exerciseTargets[exId]) return exerciseTargets[exId];
+  for (const session of allSessions || []) {
+    const ex = session.exercises?.find((e: any) => e.id === exId);
+    if (ex) {
+      const group = ex.targetGroup.toLowerCase();
+      if (group.includes('chest')) return { Chest: 1.0 };
+      if (group.includes('lat') || group.includes('back') || group.includes('rhomboid')) return { Back: 1.0 };
+      if (group.includes('shoulder') || group.includes('delt')) return { Shoulders: 1.0 };
+      if (group.includes('bicep') || group.includes('tricep') || group.includes('arm')) return { Arms: 1.0 };
+      if (group.includes('quad')) return { Quads: 1.0 };
+      if (group.includes('hamstring') || group.includes('glute')) return { Hamstrings: 0.7, Quads: 0.3 };
+      if (group.includes('core') || group.includes('ab') || group.includes('oblique')) return { Core: 1.0 };
+      break;
+    }
+  }
+  return { Back: 1.0 }; // fallback
 };
 
 interface MuscleAudit {
@@ -193,7 +212,8 @@ const getWeeklyReports = (history: any[], allSessions: any[], isImperial: boolea
       Back: 0,
       Shoulders: 0,
       Arms: 0,
-      Legs: 0,
+      Quads: 0,
+      Hamstrings: 0,
       Core: 0
     };
     
@@ -217,18 +237,13 @@ const getWeeklyReports = (history: any[], allSessions: any[], isImperial: boolea
           const workingSets = sets.filter((s: any) => !s.isWarmup);
           loggedSets += workingSets.length;
           
-          const rawMuscle = exerciseMuscleMapping[exId] || 'Back';
-          let muscleGroup = 'Back';
-          if (rawMuscle === 'Chest') muscleGroup = 'Chest';
-          else if (rawMuscle === 'Back') muscleGroup = 'Back';
-          else if (rawMuscle === 'Shoulders') muscleGroup = 'Shoulders';
-          else if (rawMuscle === 'Arms') muscleGroup = 'Arms';
-          else if (rawMuscle === 'Quads' || rawMuscle === 'Hamstrings') muscleGroup = 'Legs';
-          else if (rawMuscle === 'Core') muscleGroup = 'Core';
-          
-          if (muscleAudit[muscleGroup] !== undefined) {
-            muscleAudit[muscleGroup] += workingSets.length;
-          }
+          const targets = resolveExerciseTargets(exId, allSessions);
+          Object.keys(targets).forEach(muscle => {
+            const contribution = workingSets.length * targets[muscle];
+            if (muscleAudit[muscle] !== undefined) {
+              muscleAudit[muscle] += contribution;
+            }
+          });
         });
         
         const sessionDef = allSessions?.find((s: any) => s.id === log.sessionId);
@@ -316,7 +331,8 @@ const getMonthlyReports = (history: any[], allSessions: any[], isImperial: boole
       Back: 0,
       Shoulders: 0,
       Arms: 0,
-      Legs: 0,
+      Quads: 0,
+      Hamstrings: 0,
       Core: 0
     };
     
@@ -340,18 +356,13 @@ const getMonthlyReports = (history: any[], allSessions: any[], isImperial: boole
           const workingSets = sets.filter((s: any) => !s.isWarmup);
           loggedSets += workingSets.length;
           
-          const rawMuscle = exerciseMuscleMapping[exId] || 'Back';
-          let muscleGroup = 'Back';
-          if (rawMuscle === 'Chest') muscleGroup = 'Chest';
-          else if (rawMuscle === 'Back') muscleGroup = 'Back';
-          else if (rawMuscle === 'Shoulders') muscleGroup = 'Shoulders';
-          else if (rawMuscle === 'Arms') muscleGroup = 'Arms';
-          else if (rawMuscle === 'Quads' || rawMuscle === 'Hamstrings') muscleGroup = 'Legs';
-          else if (rawMuscle === 'Core') muscleGroup = 'Core';
-          
-          if (muscleAudit[muscleGroup] !== undefined) {
-            muscleAudit[muscleGroup] += workingSets.length;
-          }
+          const targets = resolveExerciseTargets(exId, allSessions);
+          Object.keys(targets).forEach(muscle => {
+            const contribution = workingSets.length * targets[muscle];
+            if (muscleAudit[muscle] !== undefined) {
+              muscleAudit[muscle] += contribution;
+            }
+          });
         });
         
         const sessionDef = allSessions?.find((s: any) => s.id === log.sessionId);
@@ -408,8 +419,11 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
     dateStr: string;
   } | null>(null);
   const [chartRange, setChartRange] = useState<'1W' | '1M' | '3M' | 'ALL'>('ALL');
+  const [activeDurationHoverIdx, setActiveDurationHoverIdx] = useState<number | null>(null);
   const [selectedReportIdx, setSelectedReportIdx] = useState(0);
   const [reportMode, setReportMode] = useState<'weekly' | 'monthly'>('weekly');
+  const [prSortOption, setPrSortOption] = useState<'name' | 'weight' | 'date'>('name');
+  const [prSearchQuery, setPrSearchQuery] = useState('');
   const isImperial = units === 'imperial';
 
   const calculatePersonalRecords = (history: any[]) => {
@@ -420,6 +434,9 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
         Object.keys(log.logs).forEach(exId => {
           const sets = log.logs[exId];
           if (Array.isArray(sets)) {
+            // Calculate total volume for this exercise in this specific workout log
+            const sessionVolume = sets.reduce((sum: number, s: any) => sum + (s.isWarmup ? 0 : (s.weight || 0) * (s.reps || 0)), 0);
+            
             sets.forEach((set: any) => {
               if (set.isWarmup) return; // ignore warmups in PRs
               const weight = set.weight || 0;
@@ -433,7 +450,9 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                   maxWeight: weight,
                   maxWeightDate: log.date,
                   max1RM: est1RM,
-                  max1RMDate: log.date
+                  max1RMDate: log.date,
+                  maxVolume: sessionVolume,
+                  maxVolumeDate: log.date
                 };
               } else {
                 const current = prs[exId];
@@ -445,6 +464,10 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                   current.max1RM = est1RM;
                   current.max1RMDate = log.date;
                 }
+                if (sessionVolume > current.maxVolume) {
+                  current.maxVolume = sessionVolume;
+                  current.maxVolumeDate = log.date;
+                }
               }
             });
           }
@@ -452,12 +475,27 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
       }
     });
     
-    return Object.values(prs)
-      .filter((pr: any) => pr.maxWeight > 0) // exclude bodyweight-only exercises from PR wall
-      .sort((a: any, b: any) => a.exerciseName.localeCompare(b.exerciseName)) as any[];
+    return Object.values(prs).filter((pr: any) => pr.maxWeight > 0);
   };
 
-  const personalRecords = calculatePersonalRecords(workoutHistory);
+  const personalRecords = React.useMemo(() => {
+    const rawPrs = calculatePersonalRecords(workoutHistory);
+    let filtered = rawPrs;
+    if (prSearchQuery.trim() !== '') {
+      const query = prSearchQuery.toLowerCase();
+      filtered = filtered.filter(pr => pr.exerciseName.toLowerCase().includes(query));
+    }
+    
+    if (prSortOption === 'name') {
+      filtered.sort((a, b) => a.exerciseName.localeCompare(b.exerciseName));
+    } else if (prSortOption === 'weight') {
+      filtered.sort((a, b) => b.maxWeight - a.maxWeight);
+    } else if (prSortOption === 'date') {
+      filtered.sort((a, b) => new Date(b.maxWeightDate).getTime() - new Date(a.maxWeightDate).getTime());
+    }
+    
+    return filtered;
+  }, [workoutHistory, prSortOption, prSearchQuery]);
 
   // Lifetime biophysical diagnostics calculations
   let lifetimeTonnage = 0;
@@ -507,10 +545,13 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
         const sets = log.logs[exId] || [];
         const workingSets = sets.filter((s: any) => !s.isWarmup);
         const setCount = workingSets.length;
-        const muscle = exerciseMuscleMapping[exId] || 'Back';
-        if (muscleGroupsVolume[muscle] !== undefined) {
-          muscleGroupsVolume[muscle] += setCount;
-        }
+        
+        const targets = resolveExerciseTargets(exId, allSessions);
+        Object.keys(targets).forEach(muscle => {
+          if (muscleGroupsVolume[muscle] !== undefined) {
+            muscleGroupsVolume[muscle] += setCount * targets[muscle];
+          }
+        });
       });
     }
   });
@@ -729,6 +770,75 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
 
   const maxTonnageVal = Math.max(...chartData.map(d => d.tonnage), 10000);
   const max1RMVal = Math.max(...chartData.map(d => d.strength1RM), 100);
+
+  // Process workout duration trends
+  const durationData = isHistoryEmpty
+    ? [
+        { label: 'Push', durationMins: 45, efficiency: 80, date: '05-24' },
+        { label: 'Pull', durationMins: 52, efficiency: 85, date: '05-25' },
+        { label: 'Legs', durationMins: 60, efficiency: 78, date: '05-26' },
+        { label: 'Rest', durationMins: 0, efficiency: 0, date: '05-27' },
+        { label: 'Push', durationMins: 48, efficiency: 82, date: '05-28' },
+        { label: 'Pull', durationMins: 50, efficiency: 84, date: '05-29' },
+        { label: 'Legs', durationMins: 65, efficiency: 75, date: '05-30' }
+      ]
+    : filteredHistory.slice(0, 15).reverse().map((log, index) => {
+        let durationMins = 0;
+        let setsCount = 0;
+        
+        // 1. Resolve duration
+        if (log.cardioDetails?.workoutDuration) {
+          durationMins = Math.round(log.cardioDetails.workoutDuration / 60);
+        } else if (log.recoveryDetails?.duration) {
+          durationMins = log.recoveryDetails.duration;
+        } else if (log.restDetails) {
+          durationMins = 0; // rest days don't have duration
+        }
+        
+        // 2. Count working sets
+        if (log.logs) {
+          Object.keys(log.logs).forEach(exId => {
+            const sets = log.logs[exId];
+            if (Array.isArray(sets)) {
+              sets.forEach((s: any) => {
+                if (!s.isWarmup) setsCount++;
+              });
+            }
+          });
+        }
+        
+        // 3. Compute efficiency: (working sets * 45 seconds of active lifting) / (total duration in seconds)
+        // Capped at 95% maximum to keep it realistic. Default to 80% if duration is 0 but sets logged.
+        const totalDurationSecs = (log.cardioDetails?.workoutDuration) || (durationMins * 60);
+        let efficiency = 0;
+        if (totalDurationSecs > 0 && setsCount > 0) {
+          efficiency = Math.min(95, Math.round(((setsCount * 45) / totalDurationSecs) * 100));
+        } else if (setsCount > 0) {
+          efficiency = 80;
+        }
+
+        const dateObj = new Date(log.date);
+        const dateStr = `${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+
+        return {
+          label: log.sessionTitle ? log.sessionTitle.slice(0, 8) : 'Session',
+          durationMins,
+          efficiency,
+          date: dateStr
+        };
+      });
+
+  // Calculate duration summary stats
+  const workoutsWithDuration = durationData.filter(d => d.durationMins > 0);
+  const totalHoursTrained = workoutsWithDuration.reduce((acc, d) => acc + d.durationMins, 0) / 60;
+  const avgWorkoutDuration = workoutsWithDuration.length > 0
+    ? workoutsWithDuration.reduce((acc, d) => acc + d.durationMins, 0) / workoutsWithDuration.length
+    : 0;
+  const avgEfficiency = workoutsWithDuration.length > 0
+    ? workoutsWithDuration.reduce((acc, d) => acc + d.efficiency, 0) / workoutsWithDuration.length
+    : 0;
+
+  const maxDurationVal = Math.max(...durationData.map(d => d.durationMins), 60);
 
   const [activeHoverIdx, setActiveHoverIdx] = useState<number | null>(null);
 
@@ -1360,6 +1470,185 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
             </div>
           </div>
 
+          {/* Workout Duration & Volume Efficiency Card */}
+          <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4 relative w-full overflow-hidden">
+            <div className="flex justify-between items-center">
+              <div>
+                <span className="text-[9px] uppercase tracking-wider font-bold text-zinc-500">
+                  Workout Duration Trends
+                </span>
+                <h3 className="text-xs font-semibold text-white mt-0.5">
+                  Volume Efficiency & Time Invested
+                </h3>
+              </div>
+              <span className="text-[8px] text-zinc-500 bg-white/5 border border-white/5 rounded px-1.5 font-mono font-bold">
+                METRICS
+              </span>
+            </div>
+
+            {/* Summary Statistics Grid */}
+            <div className="grid grid-cols-3 gap-2.5 w-full bg-white/[0.01] border border-white/5 rounded-xl p-3">
+              <div className="flex flex-col">
+                <span className="text-[7px] text-zinc-500 uppercase tracking-widest font-bold">Total Time</span>
+                <span className="text-sm font-extrabold text-white mt-0.5 tabular-nums">
+                  {totalHoursTrained.toFixed(1)} <span className="text-[8px] font-normal text-zinc-500">hrs</span>
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[7px] text-zinc-500 uppercase tracking-widest font-bold">Avg Length</span>
+                <span className="text-sm font-extrabold text-white mt-0.5 tabular-nums">
+                  {Math.round(avgWorkoutDuration)} <span className="text-[8px] font-normal text-zinc-500">mins</span>
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[7px] text-zinc-500 uppercase tracking-widest font-bold">Avg Efficiency</span>
+                <span className="text-sm font-extrabold text-cyan-400 mt-0.5 tabular-nums">
+                  {Math.round(avgEfficiency)}<span className="text-[8px] font-normal text-cyan-600">%</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Duration Chart SVG */}
+            <div className="relative h-28 w-full mt-1">
+              {/* Tooltip Overlay */}
+              <AnimatePresence>
+                {activeDurationHoverIdx !== null && activeDurationHoverIdx < durationData.length && (() => {
+                  const count = durationData.length;
+                  const spacing = 300 / (count + 1);
+                  const xVal = 10 + spacing * (activeDurationHoverIdx + 1);
+                  const leftPercent = (xVal / 320) * 100;
+                  
+                  const item = durationData[activeDurationHoverIdx];
+
+                  return (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                      className="absolute z-20 glass-panel border-white/10 bg-black/90 rounded-xl p-2.5 shadow-xl pointer-events-none flex flex-col gap-1 min-w-[120px]"
+                      style={{
+                        left: `${leftPercent}%`,
+                        transform: 'translateX(-50%)',
+                        top: '-30px',
+                      }}
+                    >
+                      <p className="text-[7px] text-zinc-500 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-0.5 text-center">
+                        {item.date}
+                      </p>
+                      <div className="flex flex-col gap-0.5 text-[9px] text-zinc-400 font-mono">
+                        <div className="flex justify-between gap-3">
+                          <span>Length:</span>
+                          <span className="text-white font-bold">{item.durationMins} mins</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>Efficiency:</span>
+                          <span className="text-cyan-400 font-bold">{item.efficiency}%</span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })()}
+              </AnimatePresence>
+
+              <svg viewBox="0 0 320 80" className="w-full h-full overflow-visible">
+                {/* Horizontal reference lines */}
+                <line x1="10" y1="15" x2="310" y2="15" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+                <line x1="10" y1="40" x2="310" y2="40" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+                <line x1="10" y1="65" x2="310" y2="65" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+
+                {/* Duration Bars */}
+                {durationData.map((d: any, idx: number) => {
+                  const count = durationData.length;
+                  const spacing = 300 / (count + 1);
+                  const x = 10 + spacing * (idx + 1);
+                  
+                  // Height scale (max height is 50px, from y=15 to y=65)
+                  const barHeight = d.durationMins > 0 ? (d.durationMins / maxDurationVal) * 50 : 2;
+                  const y = 65 - barHeight;
+
+                  // Color based on range
+                  let barColor = 'rgba(255,255,255,0.15)'; // Rest/none
+                  let barStroke = 'rgba(255,255,255,0.2)';
+                  if (d.durationMins > 0) {
+                    if (d.durationMins >= 45 && d.durationMins <= 75) {
+                      barColor = 'rgba(16, 185, 129, 0.2)'; // Emerald - optimal
+                      barStroke = '#10b981';
+                    } else if (d.durationMins > 75) {
+                      barColor = 'rgba(239, 68, 68, 0.2)'; // Red - high fatigue
+                      barStroke = '#ef4444';
+                    } else {
+                      barColor = 'rgba(6, 182, 212, 0.2)'; // Cyan - short/recovery
+                      barStroke = '#06b6d4';
+                    }
+                  }
+
+                  return (
+                    <g key={`dur-${idx}`}>
+                      <rect
+                        x={x - 6}
+                        y={y}
+                        width="12"
+                        height={barHeight}
+                        fill={barColor}
+                        stroke={barStroke}
+                        strokeWidth="0.75"
+                        rx="1"
+                      />
+
+                      {/* Dot for efficiency */}
+                      {d.durationMins > 0 && (
+                        <circle
+                          cx={x}
+                          cy={65 - (d.efficiency / 100) * 50}
+                          r="1.5"
+                          fill="#f59e0b"
+                        />
+                      )}
+
+                      {/* X Axis Label */}
+                      <text x={x} y="75" fill="#71717a" fontSize="6" textAnchor="middle" fontWeight="bold" fontFamily="monospace">
+                        {d.date}
+                      </text>
+
+                      {/* Interactive Hover Area */}
+                      <rect
+                        x={x - spacing / 2}
+                        y="0"
+                        width={spacing}
+                        height="80"
+                        fill="transparent"
+                        className="cursor-crosshair pointer-events-auto"
+                        onMouseEnter={() => setActiveDurationHoverIdx(idx)}
+                        onTouchStart={() => setActiveDurationHoverIdx(idx)}
+                        onMouseLeave={() => setActiveDurationHoverIdx(null)}
+                        onTouchEnd={() => setActiveDurationHoverIdx(null)}
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+            
+            <div className="flex items-center justify-center gap-4 text-[7px] font-bold text-zinc-500 uppercase tracking-widest mt-1">
+              <div className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500/20 border border-emerald-500 rounded-sm" />
+                <span>Optimal (45-75m)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-cyan-500/20 border border-cyan-500 rounded-sm" />
+                <span>Short Lifts (&lt;45m)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-red-500/20 border border-red-500 rounded-sm" />
+                <span>Fatigue Risk (&gt;75m)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                <span className="text-amber-500">Volume Efficiency</span>
+              </div>
+            </div>
+          </div>
+
           {/* Analytical Progress Reports Card */}
           <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4 relative w-full">
             <div className="flex justify-between items-center border-b border-white/5 pb-2">
@@ -1477,40 +1766,152 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
                         <span>Rest Days: <span className="text-zinc-500 font-bold">{r.restCount}</span></span>
                       </div>
 
-                      <div>
-                        <span className="text-[8.5px] uppercase tracking-wider text-zinc-500 font-bold block mb-2 font-mono">
-                          Muscle Stimulation Audit (Working Sets)
-                        </span>
-                        
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                          {Object.keys(r.muscleAudit).map((muscle) => {
-                            const sets = r.muscleAudit[muscle];
-                            const multiplier = reportMode === 'weekly' ? 1 : 4;
-                            let targetWeekly = 10;
-                            if (muscle === 'Legs') targetWeekly = 12;
-                            else if (muscle === 'Shoulders') targetWeekly = 8;
-                            else if (muscle === 'Arms' || muscle === 'Core') targetWeekly = 6;
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[8.5px] uppercase tracking-wider text-zinc-500 font-bold font-mono">
+                            Muscle Stimulation Audit (Working Sets)
+                          </span>
+                          <span className="text-[7px] text-zinc-500 font-mono">
+                            Red Dash = Target Volume
+                          </span>
+                        </div>
+
+                        {/* Interactive SVG Bar Chart */}
+                        <div className="bg-black/20 rounded-2xl p-4 border border-white/5 relative">
+                          <svg viewBox="0 0 320 120" className="w-full h-full overflow-visible">
+                            <defs>
+                              <linearGradient id="muscle-optimal-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#10b981" stopOpacity="0.8"/>
+                                <stop offset="100%" stopColor="#059669" stopOpacity="0.2"/>
+                              </linearGradient>
+                              <linearGradient id="muscle-maintenance-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.8"/>
+                                <stop offset="100%" stopColor="#0284c7" stopOpacity="0.2"/>
+                              </linearGradient>
+                              <linearGradient id="muscle-under-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.8"/>
+                                <stop offset="100%" stopColor="#d97706" stopOpacity="0.2"/>
+                              </linearGradient>
+                            </defs>
+
+                            {/* Grid Lines */}
+                            <line x1="25" y1="90" x2="310" y2="90" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                            <line x1="25" y1="50" x2="310" y2="50" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+                            <line x1="25" y1="10" x2="310" y2="10" stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+
+                            {(() => {
+                              const muscles = ['Chest', 'Back', 'Shoulders', 'Arms', 'Quads', 'Hamstrings', 'Core'];
+                              const mult = reportMode === 'weekly' ? 1 : 4;
+                              const maxVal = Math.max(...muscles.map(m => r.muscleAudit[m] || 0), 12 * mult);
+                              const spacing = (320 - 35) / muscles.length;
+
+                              return muscles.map((muscle, idx) => {
+                                const value = r.muscleAudit[muscle] || 0;
+                                const target = (muscle === 'Shoulders' ? 8 : ['Arms', 'Core'].includes(muscle) ? 6 : 10) * mult;
+                                const pct = value / target;
+
+                                const barWidth = 18;
+                                const x = 30 + idx * spacing + (spacing - barWidth) / 2;
+                                const barHeight = (value / maxVal) * 80;
+                                const y = 90 - barHeight;
+                                const targetY = 90 - (target / maxVal) * 80;
+
+                                let gradId = 'muscle-maintenance-grad';
+                                if (pct >= 1.0) gradId = 'muscle-optimal-grad';
+                                else if (pct < 0.6) gradId = 'muscle-under-grad';
+
+                                const label = muscle === 'Shoulders' ? 'Shld' : muscle === 'Hamstrings' ? 'Hams' : muscle;
+
+                                return (
+                                  <g key={muscle}>
+                                    {/* Shaded target line for this bar */}
+                                    <line 
+                                      x1={x - 2} 
+                                      y1={targetY} 
+                                      x2={x + barWidth + 2} 
+                                      y2={targetY} 
+                                      stroke="#ef4444" 
+                                      strokeWidth="1.2" 
+                                      strokeDasharray="1 1"
+                                      opacity="0.6"
+                                    />
+                                    
+                                    {/* Volume Bar */}
+                                    <rect
+                                      x={x}
+                                      y={y}
+                                      width={barWidth}
+                                      height={Math.max(2, barHeight)}
+                                      fill={`url(#${gradId})`}
+                                      stroke={pct >= 1.0 ? '#10b981' : pct < 0.6 ? '#f59e0b' : '#00f0ff'}
+                                      strokeWidth="0.75"
+                                      rx="2"
+                                    />
+
+                                    {/* Sets Count Text */}
+                                    <text 
+                                      x={x + barWidth / 2} 
+                                      y={y - 4} 
+                                      fill="#ffffff" 
+                                      fontSize="7" 
+                                      textAnchor="middle" 
+                                      fontFamily="monospace"
+                                      fontWeight="bold"
+                                    >
+                                      {value % 1 === 0 ? value : value.toFixed(1)}
+                                    </text>
+
+                                    {/* Muscle Label */}
+                                    <text 
+                                      x={x + barWidth / 2} 
+                                      y="104" 
+                                      fill="#71717a" 
+                                      fontSize="7" 
+                                      textAnchor="middle" 
+                                      fontFamily="sans-serif"
+                                      fontWeight="bold"
+                                    >
+                                      {label}
+                                    </text>
+                                  </g>
+                                );
+                              });
+                            })()}
+                          </svg>
+                        </div>
+
+                        {/* Balance Analysis */}
+                        <div className="bg-white/[0.01] border border-white/5 rounded-xl p-3 text-[9px] font-sans text-zinc-400">
+                          <span className="text-[7.5px] uppercase tracking-wider text-zinc-500 font-extrabold block mb-1 font-mono">
+                            Biomechanical Balance Analysis
+                          </span>
+                          {(() => {
+                            const muscles = ['Chest', 'Back', 'Shoulders', 'Arms', 'Quads', 'Hamstrings', 'Core'];
+                            const mult = reportMode === 'weekly' ? 1 : 4;
+                            const lagging: string[] = [];
                             
-                            const target = targetWeekly * multiplier;
-                            const pct = Math.min(100, Math.round((sets / target) * 100));
-                            
+                            muscles.forEach(m => {
+                              const val = r.muscleAudit[m] || 0;
+                              const target = (m === 'Shoulders' ? 8 : ['Arms', 'Core'].includes(m) ? 6 : 10) * mult;
+                              if (val < target * 0.6) {
+                                lagging.push(m);
+                              }
+                            });
+
+                            if (lagging.length === 0) {
+                              return (
+                                <p className="text-emerald-400 font-medium">
+                                  ✓ Calibrated Balance: All major muscle groups are meeting target stimulation volume. Hypertrophy architecture is optimal.
+                                </p>
+                              );
+                            }
+
                             return (
-                              <div key={muscle} className="flex flex-col gap-0.5 text-[9px]">
-                                <div className="flex justify-between font-medium">
-                                  <span className="text-zinc-300 font-medium">{muscle}</span>
-                                  <span className="text-zinc-500 font-mono">{sets}/{target} sets</span>
-                                </div>
-                                <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                  <div 
-                                    className={`h-full rounded-full transition-all duration-500 ${
-                                      pct >= 100 ? 'bg-emerald-400' : pct >= 50 ? 'bg-cyan-400' : 'bg-zinc-600'
-                                    }`}
-                                    style={{ width: `${pct}%` }} 
-                                  />
-                                </div>
-                              </div>
+                              <p className="text-zinc-300 leading-normal">
+                                <span className="text-amber-500 font-bold">⚠ Volume Deficit:</span> {lagging.join(', ')} {lagging.length === 1 ? 'is' : 'are'} receiving sub-optimal stimulation. Consider adding exercises to your split targeting these groups.
+                              </p>
                             );
-                          })}
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -1801,60 +2202,106 @@ export default function ArchiveView({ workoutHistory, onShareWorkout, units = 'm
           </div>
         ) : (
           /* PR Wall View */
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
-            {personalRecords.length > 0 ? (
-              personalRecords.map((pr) => {
-                const displayMaxWeight = isImperial ? (pr.maxWeight * 2.20462).toFixed(1) : pr.maxWeight.toFixed(1);
-                const displayMax1RM = isImperial ? (pr.max1RM * 2.20462).toFixed(1) : pr.max1RM.toFixed(1);
-                const unitLabel = isImperial ? 'lbs' : 'kg';
-                
-                const maxWeightDateStr = new Date(pr.maxWeightDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                const max1RMDateStr = new Date(pr.max1RMDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          <div className="flex flex-col gap-4 w-full">
+            {/* PR Controls: Search and Sort */}
+            <div className="flex flex-col sm:flex-row gap-3 justify-between items-center bg-white/[0.01] border border-white/5 rounded-2xl p-4">
+              <input
+                type="text"
+                placeholder="Search exercises..."
+                value={prSearchQuery}
+                onChange={(e) => setPrSearchQuery(e.target.value)}
+                className="w-full sm:w-60 bg-black/40 border border-white/10 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
+              />
+              
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 font-mono">Sort By:</span>
+                <div className="flex bg-black/40 border border-white/10 rounded-lg p-0.5">
+                  {(['name', 'weight', 'date'] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => setPrSortOption(opt)}
+                      className={`px-2.5 py-1 rounded text-[8px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                        prSortOption === opt
+                          ? 'bg-white text-black font-extrabold shadow'
+                          : 'text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {opt === 'name' ? 'Name' : opt === 'weight' ? 'Weight' : 'Date'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
-                return (
-                  <ScrollReveal key={pr.exerciseId}>
-                    <div className="glass-panel rounded-xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition-all duration-300">
-                      <div className="flex justify-between items-start mb-3">
-                        <h4 className="text-xs font-bold text-white-adj uppercase tracking-wide truncate max-w-[150px] sm:max-w-[180px]">
-                          {pr.exerciseName}
-                        </h4>
-                        <Award size={14} className="text-amber-400 fill-amber-400/10" />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-3 border-t border-white/5 pt-3">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
-                            Absolute Max
-                          </span>
-                          <span className="text-sm font-bold text-white-adj font-mono">
-                            {displayMaxWeight} {unitLabel}
-                          </span>
-                          <span className="text-[7px] text-zinc-500 mt-0.5 font-mono">
-                            {maxWeightDateStr}
-                          </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+              {personalRecords.length > 0 ? (
+                personalRecords.map((pr) => {
+                  const displayMaxWeight = isImperial ? (pr.maxWeight * 2.20462).toFixed(1) : pr.maxWeight.toFixed(1);
+                  const displayMax1RM = isImperial ? (pr.max1RM * 2.20462).toFixed(1) : pr.max1RM.toFixed(1);
+                  const displayMaxVolume = isImperial ? (pr.maxVolume * 2.20462).toFixed(0) : pr.maxVolume.toFixed(0);
+                  const unitLabel = isImperial ? 'lbs' : 'kg';
+                  
+                  const maxWeightDateStr = new Date(pr.maxWeightDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                  const max1RMDateStr = new Date(pr.max1RMDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                  const maxVolumeDateStr = new Date(pr.maxVolumeDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+                  return (
+                    <ScrollReveal key={pr.exerciseId}>
+                      <div className="glass-panel rounded-xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition-all duration-300">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="text-xs font-bold text-white-adj uppercase tracking-wide truncate max-w-[150px] sm:max-w-[180px]">
+                            {pr.exerciseName}
+                          </h4>
+                          <Award size={14} className="text-amber-400 fill-amber-400/10 animate-pulse" />
                         </div>
                         
-                        <div className="flex flex-col gap-0.5 border-l border-white/5 pl-3">
-                          <span className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
-                            Est. 1RM Max
-                          </span>
-                          <span className="text-sm font-bold text-cyan-400 font-mono">
-                            {displayMax1RM} {unitLabel}
-                          </span>
-                          <span className="text-[7px] text-zinc-500 mt-0.5 font-mono">
-                            {max1RMDateStr}
-                          </span>
+                        <div className="grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[7.5px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                              Abs. Max
+                            </span>
+                            <span className="text-[11px] font-bold text-white-adj font-mono truncate">
+                              {displayMaxWeight} {unitLabel}
+                            </span>
+                            <span className="text-[6px] text-zinc-500 mt-0.5 font-mono truncate">
+                              {maxWeightDateStr}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-col gap-0.5 border-l border-white/5 pl-2">
+                            <span className="text-[7.5px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                              Est. 1RM
+                            </span>
+                            <span className="text-[11px] font-bold text-cyan-400 font-mono truncate">
+                              {displayMax1RM} {unitLabel}
+                            </span>
+                            <span className="text-[6px] text-zinc-500 mt-0.5 font-mono truncate">
+                              {max1RMDateStr}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col gap-0.5 border-l border-white/5 pl-2">
+                            <span className="text-[7.5px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                              Max Vol
+                            </span>
+                            <span className="text-[11px] font-bold text-amber-500 font-mono truncate">
+                              {displayMaxVolume} {unitLabel}
+                            </span>
+                            <span className="text-[6px] text-zinc-500 mt-0.5 font-mono truncate">
+                              {maxVolumeDateStr}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </ScrollReveal>
-                );
-              })
-            ) : (
-              <div className="col-span-1 sm:col-span-2 glass-panel rounded-xl py-12 text-center text-zinc-500 italic text-[11px]">
-                No personal records detected. Log workouts with weight and reps to build your PR wall!
-              </div>
-            )}
+                    </ScrollReveal>
+                  );
+                })
+              ) : (
+                <div className="col-span-1 sm:col-span-2 glass-panel rounded-xl py-12 text-center text-zinc-500 italic text-[11px]">
+                  {prSearchQuery ? 'No personal records match your search.' : 'No personal records detected. Log workouts with weight and reps to build your PR wall!'}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </motion.div>

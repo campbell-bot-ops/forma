@@ -46,12 +46,15 @@ export default function ExerciseHistoryModal({
       const maxEst1RM = Math.max(
         ...log.sets.map(s => computeEstimated1RM(s.weight || 0, s.reps || 0))
       );
+      // Calculate total volume for this exercise in this workout session
+      const volume = log.sets.reduce((sum, s) => sum + (s.isWarmup ? 0 : (s.weight || 0) * (s.reps || 0)), 0);
       
       // Convert weights if units are imperial
       return {
         date: log.date,
         maxWeight: isImperial ? maxWeight * 2.20462 : maxWeight,
-        est1RM: isImperial ? maxEst1RM * 2.20462 : maxEst1RM
+        est1RM: isImperial ? maxEst1RM * 2.20462 : maxEst1RM,
+        volume: isImperial ? volume * 2.20462 : volume
       };
     });
 
@@ -66,6 +69,12 @@ export default function ExerciseHistoryModal({
   const minY = allYValues.length > 0 ? Math.min(...allYValues) - 2.0 : 20;
   const maxY = allYValues.length > 0 ? Math.max(...allYValues) + 2.0 : 100;
   const rangeY = maxY - minY || 1;
+
+  // Volume scaling (secondary Y-axis)
+  const allVolumeValues = chartData.map(d => d.volume);
+  const minVol = allVolumeValues.length > 0 ? Math.min(...allVolumeValues) : 0;
+  const maxVol = allVolumeValues.length > 0 ? Math.max(...allVolumeValues) : 100;
+  const rangeVol = maxVol - minVol || 1;
 
   const getCoordinates = (type: 'maxWeight' | 'est1RM') => {
     if (chartData.length === 0) return [];
@@ -139,7 +148,7 @@ export default function ExerciseHistoryModal({
         {chartData.length > 0 ? (
           <div className="glass-panel rounded-2xl p-4 flex flex-col gap-3 relative z-10">
             <div className="flex justify-between items-center text-[9px] uppercase tracking-wider text-zinc-500 font-bold">
-              <span>Hypertrophy Curve & Est. 1RM</span>
+              <span>Hypertrophy Curve, Est. 1RM & Vol</span>
               <div className="flex gap-3">
                 <span className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
@@ -148,6 +157,10 @@ export default function ExerciseHistoryModal({
                 <span className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
                   <span>Max Wt</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded bg-amber-500/40" />
+                  <span className="text-amber-500">Volume</span>
                 </span>
               </div>
             </div>
@@ -177,6 +190,12 @@ export default function ExerciseHistoryModal({
                       {chartData[activeHoverIdx].maxWeight.toFixed(1)} {weightUnit}
                     </span>
                   </div>
+                  <div>
+                    <span className="text-amber-500 font-bold">VOL:</span>{' '}
+                    <span className="text-white font-bold font-mono">
+                      {Math.round(chartData[activeHoverIdx].volume).toLocaleString()} {weightUnit}
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -186,10 +205,35 @@ export default function ExerciseHistoryModal({
                     <stop offset="0%" stopColor="#00f0ff" stopOpacity="0.15"/>
                     <stop offset="100%" stopColor="#00f0ff" stopOpacity="0.0"/>
                   </linearGradient>
+                  <linearGradient id="volume-bar-gradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.15"/>
+                    <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.01"/>
+                  </linearGradient>
                 </defs>
 
                 {/* Grid Lines */}
                 <line x1="0" y1={chartHeight / 2} x2={chartWidth} y2={chartHeight / 2} stroke="rgba(255,255,255,0.02)" strokeWidth="0.5" />
+
+                {/* Volume Background Bars */}
+                {chartData.map((d, idx) => {
+                  const count = chartData.length;
+                  const x = paddingX + (idx / Math.max(1, count - 1)) * (chartWidth - paddingX * 2);
+                  const barHeight = ((d.volume - minVol) / rangeVol) * (chartHeight - paddingY * 2);
+                  const y = chartHeight - paddingY - barHeight;
+                  return (
+                    <rect
+                      key={`vol-bar-${idx}`}
+                      x={x - 4}
+                      y={y}
+                      width="8"
+                      height={Math.max(2, barHeight)}
+                      fill="url(#volume-bar-gradient)"
+                      stroke="rgba(245, 158, 11, 0.2)"
+                      strokeWidth="0.5"
+                      rx="1"
+                    />
+                  );
+                })}
 
                 {/* 1RM Area Fill */}
                 {est1RMArea && <path d={est1RMArea} fill="url(#chart-glow-gradient)" />}

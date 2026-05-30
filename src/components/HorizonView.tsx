@@ -3,10 +3,11 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WorkoutSession, computeTotalTonnage } from '@/constants/workout';
-import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle, Droplet } from 'lucide-react';
+import { Play, Flame, Award, Dumbbell, Calendar, Moon, Minus, Plus, ShieldCheck, AlertTriangle, Droplet, Sparkles, Activity, Brain, Zap } from 'lucide-react';
 import { UserProfile } from '@/types/workout';
 import Image from 'next/image';
 import { useApp } from '@/context/AppContext';
+import { db } from '@/utils/db';
 
 const MOTIVATIONAL_QUOTES = [
   "Strip away feeds and streaks. Physical form should reflect the same essence as your professional craft.",
@@ -29,6 +30,57 @@ const MOTIVATIONAL_QUOTES = [
   "Success is the sum of small efforts, repeated day in and day out.",
   "Do today what others won't, so you can do tomorrow what others can't."
 ];
+
+const MOBILITY_ROUTINES = [
+  {
+    id: 'full-body',
+    title: 'Full Body Flow',
+    duration: 10,
+    description: 'Decompress neural pathways and restore muscle length.',
+    stretches: [
+      { name: 'Downward Dog Hold', duration: 60, cues: 'Drive heels down. Press chest to thighs.' },
+      { name: 'World Greatest Stretch (L)', duration: 60, cues: 'Step left foot forward. Rotate left hand to sky.' },
+      { name: 'World Greatest Stretch (R)', duration: 60, cues: 'Step right foot forward. Rotate right hand to sky.' },
+      { name: '90/90 Hip Switch', duration: 60, cues: 'Keep spine tall. Rotate hips side to side.' },
+      { name: 'Couch Stretch (L)', duration: 60, cues: 'Lunge left knee back against wall. Squeeze glute.' },
+      { name: 'Couch Stretch (R)', duration: 60, cues: 'Lunge right knee back against wall. Squeeze glute.' },
+      { name: 'Child Pose Decompression', duration: 60, cues: 'Sink hips to heels. Reach fingertips forward.' }
+    ]
+  },
+  {
+    id: 'lower-body',
+    title: 'Lower Body Release',
+    duration: 8,
+    description: 'Release hip flexors, hamstrings, and glutes after lifting.',
+    stretches: [
+      { name: 'Hamstring Sweep', duration: 60, cues: 'Hinge at hips. Sweep hands down and up.' },
+      { name: 'Pigeon Pose (L)', duration: 60, cues: 'Left shin parallel to front of mat. Sink deep.' },
+      { name: 'Pigeon Pose (R)', duration: 60, cues: 'Right shin parallel to front of mat. Sink deep.' },
+      { name: 'Frog Stretch', duration: 60, cues: 'Widen knees. Sink hips back.' },
+      { name: 'Calf & Achilles Stretch', duration: 60, cues: 'Pedal feet in plank position.' }
+    ]
+  },
+  {
+    id: 'upper-body',
+    title: 'Upper Body Opening',
+    duration: 8,
+    description: 'Open chest, thoracic spine, and shoulders.',
+    stretches: [
+      { name: 'Thoracic Extension (Roller)', duration: 60, cues: 'Support neck. Lean back over roller.' },
+      { name: 'Thread the Needle (L)', duration: 60, cues: 'Reach left arm under chest. Shoulder to ground.' },
+      { name: 'Thread the Needle (R)', duration: 60, cues: 'Reach right arm under chest. Shoulder to ground.' },
+      { name: 'Puppy Pose', duration: 60, cues: 'Chest to floor. Keep hips high.' },
+      { name: 'Chest Opener Wall Hold', duration: 60, cues: 'Hand against wall. Rotate body away.' }
+    ]
+  }
+];
+
+const getLocalDateString = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const getDayOfYearIndex = () => {
   const today = new Date();
@@ -195,13 +247,110 @@ interface HorizonViewProps {
 }
 
 export default function HorizonView({ sessions, workoutHistory, onStartWorkout, onShareWorkout, userProfile, onEditProgram }: HorizonViewProps) {
-  const { theme } = useApp();
+  const { theme, showToast, cnsScore, setWorkoutHistory, triggerHaptic } = useApp();
   const [quoteIdx, setQuoteIdx] = React.useState(getDayOfYearIndex());
   const [sleepHours, setSleepHours] = React.useState<number>(8.0);
+  const [sleepQuality, setSleepQuality] = React.useState<number>(8);
+  const [sleepHistory, setSleepHistory] = React.useState<Array<{ date: string; hours: number; quality: number }>>([]);
   const [isSleepModalOpen, setIsSleepModalOpen] = React.useState(false);
   const [waterIntake, setWaterIntake] = React.useState<number>(0);
   const [activeTab, setActiveTab] = React.useState<0 | 1>(0);
   const waterTarget = 3.0; // 3 Liters
+  
+  // Deload Mode State
+  const [deloadMode, setDeloadMode] = React.useState(false);
+
+  // Guided Mobility Player State
+  const [activeMobilityRoutine, setActiveMobilityRoutine] = React.useState<any | null>(null);
+  const [mobilityTimerActive, setMobilityTimerActive] = React.useState(false);
+  const [currentStretchIdx, setCurrentStretchIdx] = React.useState(0);
+  const [mobilityTimeLeft, setMobilityTimeLeft] = React.useState(0);
+  const [isMobilityPaused, setIsMobilityPaused] = React.useState(false);
+
+  const playBeep = (freq = 880, duration = 0.15) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+      const audioCtx = new AudioCtxClass();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {
+      console.warn("Web Audio API not supported or blocked", e);
+    }
+  };
+
+  const speakStretch = (name: string, cues: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+      const text = `${name}. Cues: ${cues}`;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn("SpeechSynthesis error:", e);
+    }
+  };
+
+  const startMobilityRoutine = (routine: any) => {
+    setActiveMobilityRoutine(routine);
+    setCurrentStretchIdx(0);
+    setMobilityTimeLeft(routine.stretches[0].duration);
+    setMobilityTimerActive(true);
+    setIsMobilityPaused(false);
+    triggerHaptic([40, 40]);
+    speakStretch(routine.stretches[0].name, routine.stretches[0].cues);
+  };
+
+  const completeMobilityRoutine = async () => {
+    if (!activeMobilityRoutine) return;
+    setMobilityTimerActive(false);
+    
+    const completedRecovery = {
+      sessionId: 'mobility-' + activeMobilityRoutine.id,
+      sessionTitle: activeMobilityRoutine.title,
+      sessionFocus: 'Mobility & Stretching',
+      date: new Date().toISOString(),
+      actualTonnage: 0,
+      logs: {
+        'mobility-stretch': [
+          {
+            setNumber: 1,
+            weight: 0,
+            reps: activeMobilityRoutine.duration,
+            rpe: 5
+          }
+        ]
+      },
+      recoveryDetails: {
+        duration: activeMobilityRoutine.duration,
+        activity: 'Mobility Routine',
+        recoveryRate: 8,
+        distance: 0,
+        calories: activeMobilityRoutine.duration * 4
+      }
+    };
+
+    try {
+      const newHistory = await db.logWorkout(completedRecovery);
+      setWorkoutHistory(newHistory);
+      showToast(`${activeMobilityRoutine.title} logged! Consistency heatmap updated.`);
+    } catch (e) {
+      console.error("Failed to log recovery workout:", e);
+    }
+
+    setActiveMobilityRoutine(null);
+  };
   
   const [scrolled, setScrolled] = React.useState(false);
   const [selectedMuscle, setSelectedMuscle] = React.useState<string | null>(null);
@@ -261,27 +410,58 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
     mouseStartX.current = null;
   };
 
-  // Sync sleepHours and waterIntake from localStorage
+  // Sync sleep history and water intake from database & localStorage
   React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedSleep = localStorage.getItem('forma_sleep_hours');
-      if (storedSleep) {
-        setSleepHours(parseFloat(storedSleep));
+    async function loadSleepAndWater() {
+      try {
+        const history = await db.getSleepHistory();
+        setSleepHistory(history);
+        const todayStr = getLocalDateString(new Date());
+        const todaySleep = history.find(s => s.date === todayStr);
+        if (todaySleep) {
+          setSleepHours(todaySleep.hours);
+          setSleepQuality(todaySleep.quality);
+        } else {
+          const storedSleep = localStorage.getItem('forma_sleep_hours');
+          if (storedSleep) {
+            setSleepHours(parseFloat(storedSleep));
+          }
+          const storedQuality = localStorage.getItem('forma_sleep_quality');
+          if (storedQuality) {
+            setSleepQuality(parseInt(storedQuality));
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to load sleep history:", e);
       }
-      
-      const todayStr = new Date().toDateString();
-      const storedWater = localStorage.getItem(`forma_water_intake_${todayStr}`);
-      if (storedWater) {
-        setWaterIntake(parseFloat(storedWater));
+
+      if (typeof window !== 'undefined') {
+        const todayStr = new Date().toDateString();
+        const storedWater = localStorage.getItem(`forma_water_intake_${todayStr}`);
+        if (storedWater) {
+          setWaterIntake(parseFloat(storedWater));
+        }
+
+        // Sync deload state
+        setDeloadMode(localStorage.getItem('forma_deload_mode') === 'true');
       }
     }
+    loadSleepAndWater();
   }, []);
 
-  const adjustSleep = (amount: number) => {
-    const newSleep = Math.max(3.0, Math.min(12.0, sleepHours + amount));
-    setSleepHours(newSleep);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('forma_sleep_hours', newSleep.toFixed(1));
+  const saveSleepLog = async (hours: number, quality: number) => {
+    try {
+      const updated = await db.logSleep(hours, quality);
+      setSleepHistory(updated);
+      setSleepHours(hours);
+      setSleepQuality(quality);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('forma_sleep_hours', hours.toFixed(1));
+        localStorage.setItem('forma_sleep_quality', quality.toString());
+      }
+      showToast("Sleep log applied to CNS index.");
+    } catch (e) {
+      showToast("Failed to save sleep log.");
     }
   };
 
@@ -293,6 +473,181 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
       localStorage.setItem(`forma_water_intake_${todayStr}`, newIntake.toFixed(2));
     }
   };
+
+  const toggleDeloadMode = () => {
+    const nextVal = !deloadMode;
+    setDeloadMode(nextVal);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('forma_deload_mode', String(nextVal));
+    }
+    showToast(nextVal ? "Deload Mode Activated. Target weights scaled by -20%." : "Deload Mode Deactivated. Standard targets restored.");
+  };
+
+  // Concentric Readiness Score Calculation
+  const readinessScore = React.useMemo(() => {
+    const sleepHoursRatio = Math.max(0, 100 * (1 - Math.abs(sleepHours - 8) / 4));
+    const sleepQualityRatio = sleepQuality * 10;
+    
+    // Volume strain penalty (up to -15%): deducted if total tonnage in the last 48 hours is exceptionally high
+    const fortyEightHoursAgo = Date.now() - 48 * 60 * 60 * 1000;
+    const recentVolume = workoutHistory
+      .filter(log => new Date(log.date).getTime() >= fortyEightHoursAgo)
+      .reduce((sum, log) => sum + (log.actualTonnage || 0), 0);
+    
+    let volumeStrainPenalty = 0;
+    if (recentVolume > 15000) volumeStrainPenalty = 15;
+    else if (recentVolume > 7500) volumeStrainPenalty = 7.5;
+    
+    const score = 0.4 * cnsScore + 0.3 * sleepHoursRatio + 0.3 * sleepQualityRatio - volumeStrainPenalty;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }, [cnsScore, sleepHours, sleepQuality, workoutHistory]);
+
+  const strokeDashoffset = 188.5 - (188.5 * readinessScore) / 100;
+
+  const { readinessGrad, readinessStatus, readinessStatusClass } = React.useMemo(() => {
+    if (readinessScore >= 80) {
+      return {
+        readinessGrad: 'readiness-cyan-grad',
+        readinessStatus: 'Optimal',
+        readinessStatusClass: 'text-cyan-400'
+      };
+    } else if (readinessScore >= 50) {
+      return {
+        readinessGrad: 'readiness-amber-grad',
+        readinessStatus: 'Fair',
+        readinessStatusClass: 'text-amber-500'
+      };
+    } else {
+      return {
+        readinessGrad: 'readiness-crimson-grad',
+        readinessStatus: 'Fatigued',
+        readinessStatusClass: 'text-rose-500'
+      };
+    }
+  }, [readinessScore]);
+
+  // AI coach fatigue analyzer
+  const fatigueAnalysis = React.useMemo(() => {
+    let avgSleepHours = sleepHours;
+    let avgSleepQuality = sleepQuality;
+    if (sleepHistory && sleepHistory.length > 0) {
+      const recentSleeps = sleepHistory.slice(-7);
+      const sumH = recentSleeps.reduce((sum, s) => sum + s.hours, 0);
+      const sumQ = recentSleeps.reduce((sum, s) => sum + s.quality, 0);
+      avgSleepHours = sumH / recentSleeps.length;
+      avgSleepQuality = sumQ / recentSleeps.length;
+    }
+    const sleepDeficit = avgSleepHours < 7.0 || avgSleepQuality < 6.0;
+
+    let avgRpeVal = 0;
+    let rpeCount = 0;
+    const last3Workouts = workoutHistory.filter(w => w.actualTonnage > 0).slice(0, 3);
+    last3Workouts.forEach(w => {
+      if (w.logs) {
+        Object.keys(w.logs).forEach(exId => {
+          const sets = w.logs[exId];
+          if (Array.isArray(sets)) {
+            sets.forEach(s => {
+              if (s.rpe && !s.isWarmup) {
+                avgRpeVal += s.rpe;
+                rpeCount++;
+              }
+            });
+          }
+        });
+      }
+    });
+    const avgRpe = rpeCount > 0 ? avgRpeVal / rpeCount : 7.5;
+    const highIntensity = avgRpe >= 8.8;
+
+    // WoW Tonnage growth
+    const now = Date.now();
+    const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+    const week1Volume = workoutHistory
+      .filter(w => now - new Date(w.date).getTime() < oneWeekMs && w.actualTonnage > 0)
+      .reduce((sum, w) => sum + w.actualTonnage, 0);
+    const week2Volume = workoutHistory
+      .filter(w => {
+        const diff = now - new Date(w.date).getTime();
+        return diff >= oneWeekMs && diff < 2 * oneWeekMs && w.actualTonnage > 0;
+      })
+      .reduce((sum, w) => sum + w.actualTonnage, 0);
+    const week3Volume = workoutHistory
+      .filter(w => {
+        const diff = now - new Date(w.date).getTime();
+        return diff >= 2 * oneWeekMs && diff < 3 * oneWeekMs && w.actualTonnage > 0;
+      })
+      .reduce((sum, w) => sum + w.actualTonnage, 0);
+
+    let overAccumulation = false;
+    if (week3Volume > 0 && week2Volume > 0 && week1Volume > 0) {
+      const growth1 = (week2Volume - week3Volume) / week3Volume;
+      const growth2 = (week1Volume - week2Volume) / week2Volume;
+      if (growth1 > 0.15 && growth2 > 0.15) {
+        overAccumulation = true;
+      }
+    }
+
+    let recommendation = 'Maintain';
+    let reasoning = 'Fatigue levels are stable and sleep is within target ranges.';
+    if (sleepDeficit && highIntensity) {
+      recommendation = 'Deload Recommended';
+      reasoning = 'High training intensity combined with severe sleep deficit detected. Neural systems require rest.';
+    } else if (overAccumulation || highIntensity) {
+      recommendation = 'Deload Recommended';
+      reasoning = 'Neural fatigue accumulation warning: weekly tonnage growth is too aggressive.';
+    } else if (sleepDeficit) {
+      recommendation = 'Maintain';
+      reasoning = 'Sleep deficit is present. Keep weights constant and focus on lifestyle recovery.';
+    } else if (!sleepDeficit && !highIntensity && !overAccumulation) {
+      recommendation = 'Push Intensity';
+      reasoning = 'Optimal recovery, high sleep quality, and low systemic fatigue. Green light to push progressive overload.';
+    }
+
+    return {
+      recommendation,
+      reasoning,
+      sleepDeficit,
+      highIntensity,
+      overAccumulation
+    };
+  }, [workoutHistory, sleepHistory, sleepHours, sleepQuality]);
+
+  // Mobility Timer tick interval
+  React.useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    if (mobilityTimerActive && activeMobilityRoutine && !isMobilityPaused) {
+      intervalId = setInterval(() => {
+        setMobilityTimeLeft(prev => {
+          if (prev <= 1) {
+            playBeep(880, 0.4);
+            triggerHaptic([40, 40]);
+            
+            const nextIdx = currentStretchIdx + 1;
+            if (nextIdx < activeMobilityRoutine.stretches.length) {
+              setCurrentStretchIdx(nextIdx);
+              const nextStretch = activeMobilityRoutine.stretches[nextIdx];
+              speakStretch(nextStretch.name, nextStretch.cues);
+              return nextStretch.duration;
+            } else {
+              if (intervalId) clearInterval(intervalId);
+              completeMobilityRoutine();
+              return 0;
+            }
+          } else {
+            if (prev - 1 <= 3) {
+              playBeep(440, 0.1);
+            }
+            return prev - 1;
+          }
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [mobilityTimerActive, activeMobilityRoutine, currentStretchIdx, isMobilityPaused]);
 
   const calculateWorkoutStreak = (history: any[]): number => {
     if (!history || history.length === 0) return 0;
@@ -348,6 +703,100 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
   };
 
   const workoutStreak = calculateWorkoutStreak(workoutHistory);
+
+  const getCalendarHeatmapData = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Find the Monday of the current week
+    const currentDay = today.getDay();
+    const diffToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const mondayOfCurrentWeek = new Date(today);
+    mondayOfCurrentWeek.setDate(today.getDate() + diffToMonday);
+    
+    // Go back 4 weeks from this Monday to get a total of 5 weeks (35 days)
+    const startMonday = new Date(mondayOfCurrentWeek);
+    startMonday.setDate(mondayOfCurrentWeek.getDate() - 28);
+    
+    const days: Array<{ date: Date; dateStr: string; activity: 'workout' | 'recovery' | 'rest' | 'none'; tonnage: number; minutes: number; isFuture: boolean }> = [];
+    const runner = new Date(startMonday);
+    
+    for (let i = 0; i < 35; i++) {
+      const dateStr = getLocalDateString(runner);
+      days.push({
+        date: new Date(runner),
+        dateStr,
+        activity: 'none',
+        tonnage: 0,
+        minutes: 0,
+        isFuture: runner > today
+      });
+      runner.setDate(runner.getDate() + 1);
+    }
+    
+    workoutHistory?.forEach(log => {
+      const logDate = new Date(log.date);
+      const dateStr = getLocalDateString(logDate);
+      const match = days.find(day => day.dateStr === dateStr);
+      if (match) {
+        if (log.actualTonnage > 0) {
+          match.activity = 'workout';
+          match.tonnage = log.actualTonnage;
+        } else if (log.recoveryDetails?.duration) {
+          match.activity = 'recovery';
+          match.minutes = log.recoveryDetails.duration;
+        } else if (log.restDetails) {
+          match.activity = 'rest';
+        }
+      }
+    });
+    
+    const weeks: Array<typeof days> = [];
+    for (let i = 0; i < 35; i += 7) {
+      weeks.push(days.slice(i, i + 7));
+    }
+    return weeks;
+  }, [workoutHistory]);
+
+  const calculateActivityStreak = React.useMemo(() => {
+    if (!workoutHistory || workoutHistory.length === 0) return 0;
+
+    const loggedDates = new Set<string>();
+    workoutHistory.forEach(log => {
+      loggedDates.add(getLocalDateString(new Date(log.date)));
+    });
+
+    let streak = 0;
+    const checkDate = new Date();
+    checkDate.setHours(0, 0, 0, 0);
+
+    const todayStr = getLocalDateString(checkDate);
+    const yesterday = new Date(checkDate);
+    yesterday.setDate(checkDate.getDate() - 1);
+    const yesterdayStr = getLocalDateString(yesterday);
+
+    let startDate = checkDate;
+    if (!loggedDates.has(todayStr)) {
+      if (loggedDates.has(yesterdayStr)) {
+        startDate = yesterday;
+      } else {
+        return 0;
+      }
+    }
+
+    const runner = new Date(startDate);
+    while (true) {
+      const dateStr = getLocalDateString(runner);
+      if (loggedDates.has(dateStr)) {
+        streak++;
+        runner.setDate(runner.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }, [workoutHistory]);
 
   const handleCycleQuote = () => {
     setQuoteIdx((prev) => (prev + 1) % MOTIVATIONAL_QUOTES.length);
@@ -753,52 +1202,70 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                   </div>
                 </div>
 
-                {/* Tab 2: Biophysical Wellness (5-span Water, 7-span Pills) */}
+                {/* Tab 2: Biophysical Wellness (5-span Readiness circle, 7-span Pills) */}
                 <div className="w-1/2 flex-shrink-0 grid grid-cols-12 gap-3 sm:gap-4 pl-1.5 sm:pl-2">
                   
-                  {/* Left: Water Intake Bento Card */}
-                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-5 flex flex-col justify-between min-h-[180px] sm:min-h-[216px] relative overflow-hidden group">
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 bg-[#2f80ed]/10 transition-all duration-700 pointer-events-none" 
-                      style={{ height: `${Math.min(100, (waterIntake / waterTarget) * 100)}%` }}
-                    />
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-center relative z-10 gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <Droplet size={12} className="text-blue-400 fill-blue-400/20" />
-                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-zinc-400 font-bold font-sans">
-                          Hydration
+                  {/* Left: Recovery Readiness Score Bento Card */}
+                  <div className="col-span-5 bg-card-1 border border-white/5 rounded-[24px] sm:rounded-[28px] p-3 sm:p-4 flex flex-col items-center justify-between min-h-[180px] sm:min-h-[216px] relative overflow-hidden">
+                    <div className="absolute -bottom-8 -right-8 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+                    
+                    <span className="text-[8px] sm:text-[9px] font-bold text-zinc-500 uppercase tracking-widest font-mono text-center">
+                      Readiness Index
+                    </span>
+
+                    <div className="relative flex items-center justify-center my-1">
+                      <svg className="w-16 h-16 sm:w-20 sm:h-20" viewBox="0 0 100 100">
+                        <defs>
+                          <linearGradient id="readiness-cyan-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#00f0ff" />
+                            <stop offset="100%" stopColor="#3b82f6" />
+                          </linearGradient>
+                          <linearGradient id="readiness-amber-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#ffaa00" />
+                            <stop offset="100%" stopColor="#ff7700" />
+                          </linearGradient>
+                          <linearGradient id="readiness-crimson-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#ff3355" />
+                            <stop offset="100%" stopColor="#ff0000" />
+                          </linearGradient>
+                        </defs>
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="30"
+                          className="stroke-zinc-800/40 dark:stroke-zinc-800/60 fill-transparent"
+                          strokeWidth="6"
+                        />
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="30"
+                          className="fill-transparent"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                          strokeDasharray="188.5"
+                          strokeDashoffset={strokeDashoffset}
+                          transform="rotate(-90 50 50)"
+                          style={{
+                            stroke: `url(#${readinessGrad})`,
+                            transition: 'stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-sm sm:text-base font-extrabold text-white-adj font-mono leading-none">
+                          {readinessScore}%
                         </span>
                       </div>
-                      <span className="text-[7px] font-mono text-blue-400 bg-blue-950/20 border border-blue-900/30 rounded px-1.5 py-0.5 uppercase self-start sm:self-auto whitespace-nowrap">
-                        Water Log
-                      </span>
                     </div>
-                    <div className="my-1.5 sm:my-2 text-center relative z-10">
-                      <p className="text-xl sm:text-3xl font-extrabold text-white-adj font-mono leading-none">
-                        {waterIntake.toFixed(2)}<span className="text-[10px] sm:text-xs font-bold text-zinc-500">L</span>
-                      </p>
-                      <p className="text-[8px] sm:text-[10px] text-zinc-500 mt-0.5 sm:mt-1 font-medium font-mono">
-                        Target: {waterTarget.toFixed(2)} L
-                      </p>
-                    </div>
-                    <div className="flex justify-center items-center gap-1 sm:gap-4 relative z-10">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); adjustWater(-0.25); }}
-                        className="w-6 h-6 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white-adj cursor-pointer transition-all active:scale-90"
-                        title="Subtract 250ml"
-                      >
-                        <Minus size={10} className="sm:w-[14px] sm:h-[14px]" />
-                      </button>
-                      <span className="text-[7px] sm:text-[9px] font-bold font-mono text-zinc-400 uppercase tracking-wider whitespace-nowrap px-0.5">
-                        250 ml
+
+                    <div className="text-center w-full">
+                      <span className={`text-[8px] sm:text-[9px] font-bold uppercase tracking-wider ${readinessStatusClass}`}>
+                        {readinessStatus}
                       </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); adjustWater(0.25); }}
-                        className="w-6 h-6 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white-adj cursor-pointer transition-all active:scale-90"
-                        title="Add 250ml"
-                      >
-                        <Plus size={10} className="sm:w-[14px] sm:h-[14px]" />
-                      </button>
+                      <p className="text-[6px] sm:text-[7px] text-zinc-500 font-mono mt-0.5">
+                        CNS: {cnsScore}% &bull; Sleep: {Math.round(sleepHours * 10)}%
+                      </p>
                     </div>
                   </div>
 
@@ -815,10 +1282,10 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       </div>
                       <div className="flex flex-col min-w-0">
                         <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-sleep-muted font-semibold font-sans">
-                          Sleep Duration
+                          Sleep Log
                         </span>
                         <span className="text-[11px] sm:text-sm font-bold text-sleep-text font-sans leading-tight">
-                          {Math.floor(sleepHours)}h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)}m` : '00m'}
+                          {Math.floor(sleepHours)}h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)}m` : '00m'} &bull; Q{sleepQuality}
                         </span>
                       </div>
                       <span className="ml-auto text-[7px] sm:text-[9px] uppercase tracking-wider text-sleep-muted font-semibold font-sans font-mono border border-white/5 bg-black/10 rounded px-1.5 py-0.5">
@@ -826,16 +1293,47 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       </span>
                     </div>
 
-                    {/* Card 2: CNS Readiness State */}
+                    {/* Card 2: Hydration Stats Pill */}
+                    <div className="bg-blue-50 dark:bg-[#2f80ed]/10 border border-blue-200 dark:border-[#2f80ed]/20 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-blue-100 dark:bg-[#2f80ed]/20 flex-shrink-0">
+                        <Droplet size={15} className="text-blue-600 dark:text-blue-400 fill-blue-500/20" />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-blue-800 dark:text-blue-300 font-semibold font-sans">
+                          Water Intake
+                        </span>
+                        <span className="text-[11px] sm:text-sm font-bold text-white-adj font-sans leading-tight truncate">
+                          {waterIntake.toFixed(2)}L / {waterTarget.toFixed(2)}L
+                        </span>
+                      </div>
+                      <div className="ml-auto flex items-center gap-1 z-10">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); adjustWater(-0.25); }}
+                          className="w-5 h-5 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-zinc-300 hover:text-white hover:bg-white/10 cursor-pointer transition-all active:scale-90"
+                          title="Subtract 250ml"
+                        >
+                          <Minus size={8} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); adjustWater(0.25); }}
+                          className="w-5 h-5 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-zinc-300 hover:text-white hover:bg-white/10 cursor-pointer transition-all active:scale-90"
+                          title="Add 250ml"
+                        >
+                          <Plus size={8} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Card 3: CNS Readiness State */}
                     <div className={`rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] border border-white/5 relative overflow-hidden ${
-                      sleepHours < 7.0 
+                      cnsScore < 70 
                         ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' 
                         : 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20'
                     }`}>
                       <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${
-                        sleepHours < 7.0 ? 'bg-amber-100 dark:bg-amber-500/20' : 'bg-emerald-100 dark:bg-emerald-500/20'
+                        cnsScore < 70 ? 'bg-amber-100 dark:bg-amber-500/20' : 'bg-emerald-100 dark:bg-emerald-500/20'
                       } flex-shrink-0`}>
-                        {sleepHours < 7.0 ? (
+                        {cnsScore < 70 ? (
                           <AlertTriangle size={15} className="text-amber-700 dark:text-amber-400" />
                         ) : (
                           <ShieldCheck size={15} className="text-emerald-700 dark:text-emerald-400" />
@@ -846,29 +1344,11 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                           CNS Readiness
                         </span>
                         <span className={`text-[11px] sm:text-sm font-bold font-sans leading-tight truncate ${
-                          sleepHours < 7.0 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'
+                          cnsScore < 70 ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'
                         }`}>
-                          {sleepHours < 7.0 ? 'Deload Rec.' : 'CNS Optimal'}
+                          {cnsScore}% &mdash; {cnsScore < 70 ? 'Deload advised' : 'Optimal'}
                         </span>
                       </div>
-                    </div>
-
-                    {/* Card 3: Hydration Stats Pill */}
-                    <div className="bg-blue-50 dark:bg-[#2f80ed]/10 border border-blue-200 dark:border-[#2f80ed]/20 rounded-full p-2 sm:p-2.5 pr-4 sm:pr-6 flex items-center gap-2 sm:gap-3.5 h-[52px] sm:h-[64px] relative overflow-hidden">
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-blue-100 dark:bg-[#2f80ed]/20 flex-shrink-0">
-                        <Droplet size={15} className="text-blue-600 dark:text-blue-400 fill-blue-500/20" />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-[8px] sm:text-[10px] uppercase tracking-wider text-blue-800 dark:text-blue-300 font-semibold font-sans">
-                          Hydration Stats
-                        </span>
-                        <span className="text-[11px] sm:text-sm font-bold text-white-adj font-sans leading-tight truncate">
-                          {waterIntake >= waterTarget ? 'Goal Achieved' : 'Drink More Water'}
-                        </span>
-                      </div>
-                      <span className="ml-auto text-[9px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 font-sans whitespace-nowrap">
-                        {Math.round((waterIntake / waterTarget) * 100)}%
-                      </span>
                     </div>
 
                   </div>
@@ -891,6 +1371,191 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
               />
             </div>
 
+          </motion.div>
+
+          {/* AI Coach & Deload Advisor */}
+          <motion.div variants={itemVariants} className="w-full">
+            <div className="relative overflow-hidden rounded-[28px] border border-white/5 bg-gradient-to-br from-[#131316] via-[#0b0b0d] to-[#17171c] p-6 shadow-2xl transition-all duration-300 hover:border-white/10 group">
+              
+              {/* Radial Glow Overlay based on recommendation */}
+              <div className={`absolute -right-16 -bottom-16 w-44 h-44 rounded-full blur-[70px] pointer-events-none transition-all duration-500 opacity-40 ${
+                fatigueAnalysis.recommendation === 'Deload Recommended'
+                  ? 'bg-rose-500/20'
+                  : fatigueAnalysis.recommendation === 'Push Intensity'
+                  ? 'bg-cyan-500/20'
+                  : 'bg-amber-500/20'
+              }`} />
+
+              {/* Grid backdrop pattern for extra premium look */}
+              <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none rounded-[28px]" />
+
+              <div className="relative z-10 flex flex-col md:flex-row gap-5 items-start justify-between">
+                
+                {/* Visual Core & Left Column Info */}
+                <div className="flex items-center gap-4 min-w-0">
+                  {/* Glowing Animated Visual Neural Core */}
+                  <div className="relative flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center bg-white/[0.02] border border-white/10 overflow-hidden shadow-inner">
+                    {/* Ring animations */}
+                    <div className={`absolute inset-1 rounded-full border border-dashed animate-[spin_10s_linear_infinite] opacity-30 ${
+                      fatigueAnalysis.recommendation === 'Deload Recommended'
+                        ? 'border-rose-400'
+                        : fatigueAnalysis.recommendation === 'Push Intensity'
+                        ? 'border-cyan-400'
+                        : 'border-amber-400'
+                    }`} />
+                    
+                    {/* Glowing Aura inside Core */}
+                    <div className={`absolute w-8 h-8 rounded-full blur-md opacity-25 ${
+                      fatigueAnalysis.recommendation === 'Deload Recommended'
+                        ? 'bg-rose-500'
+                        : fatigueAnalysis.recommendation === 'Push Intensity'
+                        ? 'bg-cyan-500'
+                        : 'bg-amber-500'
+                    }`} />
+                    
+                    {/* Dynamic Center Icon: Custom AI Processor Logo */}
+                    <svg 
+                      className="w-7 h-7 relative z-10" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor"
+                    >
+                      {/* Outer chip boundary */}
+                      <rect 
+                        x="4" 
+                        y="4" 
+                        width="16" 
+                        height="16" 
+                        rx="3" 
+                        strokeWidth="1.5" 
+                        className={
+                          fatigueAnalysis.recommendation === 'Deload Recommended'
+                            ? 'text-rose-500'
+                            : fatigueAnalysis.recommendation === 'Push Intensity'
+                            ? 'text-cyan-400'
+                            : 'text-amber-500'
+                        } 
+                      />
+                      {/* Circuit pins */}
+                      <path 
+                        d="M8 1v3M12 1v3M16 1v3M8 20v3M12 20v3M16 20v3M1 8h3M1 12h3M1 16h3M20 8h3M20 12h3M20 16h3" 
+                        strokeWidth="1" 
+                        strokeLinecap="round" 
+                        className="text-zinc-600/80" 
+                      />
+                      {/* AI styled text */}
+                      <text 
+                        x="12" 
+                        y="13" 
+                        textAnchor="middle" 
+                        dominantBaseline="middle" 
+                        fontSize="7" 
+                        fontWeight="bold" 
+                        fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" 
+                        className={
+                          fatigueAnalysis.recommendation === 'Deload Recommended'
+                            ? 'fill-rose-400'
+                            : fatigueAnalysis.recommendation === 'Push Intensity'
+                            ? 'fill-cyan-300'
+                            : 'fill-amber-400'
+                        }
+                      >
+                        AI
+                      </text>
+                    </svg>
+                  </div>
+
+                  {/* Recommendation Title */}
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[8px] tracking-[0.2em] font-black uppercase text-zinc-500 font-mono">
+                      AI Coach
+                    </span>
+                    <h4 className="text-sm font-extrabold text-white mt-0.5 flex items-center gap-1.5 leading-tight font-sans">
+                      System Advice
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        fatigueAnalysis.recommendation === 'Deload Recommended'
+                          ? 'bg-rose-500 animate-ping'
+                          : fatigueAnalysis.recommendation === 'Push Intensity'
+                          ? 'bg-cyan-400'
+                          : 'bg-amber-500'
+                      }`} />
+                    </h4>
+                    <span className={`text-[10px] font-extrabold tracking-wide mt-1 font-mono transition-all duration-300 uppercase ${
+                      fatigueAnalysis.recommendation === 'Deload Recommended'
+                        ? 'text-rose-400'
+                        : fatigueAnalysis.recommendation === 'Push Intensity'
+                        ? 'text-cyan-400'
+                        : 'text-amber-500'
+                    }`}>
+                      {fatigueAnalysis.recommendation}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Sub-telemetry Metrics Board (Mini-Chips) */}
+                <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                  {/* Sleep Deficit Chip */}
+                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[8px] font-bold uppercase tracking-wider font-mono ${
+                    fatigueAnalysis.sleepDeficit
+                      ? 'bg-rose-950/20 border-rose-900/30 text-rose-400'
+                      : 'bg-zinc-900/40 border-zinc-800 text-zinc-400'
+                  }`}>
+                    <Moon size={9} />
+                    <span>Sleep: {fatigueAnalysis.sleepDeficit ? 'Deficit' : 'Charged'}</span>
+                  </div>
+
+                  {/* Intensity Load Chip */}
+                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[8px] font-bold uppercase tracking-wider font-mono ${
+                    fatigueAnalysis.highIntensity
+                      ? 'bg-amber-950/20 border-amber-900/30 text-amber-400'
+                      : 'bg-zinc-900/40 border-zinc-800 text-zinc-400'
+                  }`}>
+                    <Activity size={9} />
+                    <span>RPE: {fatigueAnalysis.highIntensity ? 'Aggressive' : 'Optimal'}</span>
+                  </div>
+
+                  {/* Overaccumulation Chip */}
+                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[8px] font-bold uppercase tracking-wider font-mono ${
+                    fatigueAnalysis.overAccumulation
+                      ? 'bg-rose-950/20 border-rose-900/30 text-rose-400 animate-pulse'
+                      : 'bg-zinc-900/40 border-zinc-800 text-zinc-400'
+                  }`}>
+                    <Flame size={9} />
+                    <span>Volume: {fatigueAnalysis.overAccumulation ? 'Surging' : 'Steady'}</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Reasoning Description */}
+              <div className="mt-4 text-[11px] text-zinc-400 leading-relaxed font-light font-sans border-l-2 border-white/5 pl-3 group-hover:border-white/10 transition-colors">
+                {fatigueAnalysis.reasoning}
+              </div>
+
+              {/* Toggler Area */}
+              <div className="mt-5 pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 font-sans">
+                    Deload Mode Protocol
+                  </span>
+                  <span className="text-[8.5px] text-zinc-500 font-mono mt-0.5 leading-tight">
+                    Limits training targets by -20% and caps max recommended RPE to 7.0
+                  </span>
+                </div>
+                
+                <button
+                  onClick={toggleDeloadMode}
+                  className={`w-full sm:w-auto px-5 py-3 rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all duration-300 cursor-pointer border ${
+                    deloadMode
+                      ? 'bg-[#14b8a6] text-black border-teal-300 shadow-[0_0_15px_rgba(20,184,166,0.3)] hover:bg-teal-400 active:scale-[0.98]'
+                      : 'bg-white/5 border-white/10 hover:bg-white/10 text-zinc-300 hover:text-white active:scale-[0.98]'
+                  }`}
+                >
+                  {deloadMode ? '⚠️ PROTOCOL ACTIVE' : 'ACTIVATE DELOAD'}
+                </button>
+              </div>
+
+            </div>
           </motion.div>
           
           {/* Standalone Today's Plan Card (Formal Start Workout Card) */}
@@ -1124,6 +1789,100 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Monthly Activity Calendar Heatmap Card */}
+          <motion.div variants={itemVariants} className="w-full">
+            <div className="glass-panel rounded-3xl p-5 relative overflow-hidden flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                    PHYSICAL CONSISTENCY HEATMAP
+                  </span>
+                  <h3 className="text-sm font-semibold text-white mt-0.5">
+                    Monthly Activity Calendar
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1.5 bg-orange-500/10 border border-orange-500/20 rounded px-2 py-0.5 text-[8.5px] font-mono font-bold text-orange-400">
+                  <Flame size={10} className="fill-orange-400/20 animate-pulse" />
+                  <span>{calculateActivityStreak} DAY STREAK</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {/* 5x7 Grid Wrapper */}
+                <div className="flex gap-2.5 items-center justify-center py-2 bg-black/20 rounded-2xl border border-white/5">
+                  {/* Y-axis Labels */}
+                  <div className="flex flex-col justify-between text-[7.5px] text-zinc-600 font-bold h-[82px] pr-1.5 font-mono text-right uppercase leading-none">
+                    <span>Mon</span>
+                    <span>Wed</span>
+                    <span>Fri</span>
+                    <span>Sun</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {getCalendarHeatmapData.map((week, wIdx) => (
+                      <div key={wIdx} className="flex flex-col gap-2">
+                        {week.map((day) => {
+                          let bgClass = 'bg-zinc-900/40 border-white/5';
+                          let titleText = `${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: No Activity`;
+
+                          if (day.isFuture) {
+                            bgClass = 'border-dashed border-white/[0.03] bg-transparent';
+                            titleText = `${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (Future)`;
+                          } else if (day.activity === 'workout') {
+                            bgClass = 'bg-cyan-500 border-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.3)]';
+                            titleText = `${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: Workout logged (${Math.round(isImperial ? day.tonnage * 2.20462 : day.tonnage)} ${isImperial ? 'lbs' : 'kg'})`;
+                          } else if (day.activity === 'recovery') {
+                            bgClass = 'bg-teal-600/70 border-teal-500/30';
+                            titleText = `${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: Active Recovery logged (${day.minutes} mins)`;
+                          } else if (day.activity === 'rest') {
+                            bgClass = 'bg-zinc-700/60 border-zinc-600/20';
+                            titleText = `${day.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: Rest Day logged`;
+                          }
+
+                          return (
+                            <div
+                              key={day.dateStr}
+                              className={`w-2.5 h-2.5 rounded-[2px] border transition-all duration-300 cursor-pointer ${bgClass}`}
+                              title={titleText}
+                              onClick={() => {
+                                if (!day.isFuture) {
+                                  showToast(titleText);
+                                }
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Heatmap Legend */}
+                <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500 px-1">
+                  <span>Past 5 Weeks</span>
+                  <div className="flex gap-2 items-center">
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-[1px] bg-zinc-900/40 border border-white/5" />
+                      <span>None</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-[1px] bg-zinc-700/60 border border-zinc-600/20" />
+                      <span>Rest</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-[1px] bg-teal-600/70 border border-teal-500/30" />
+                      <span>Rec</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-[1px] bg-cyan-500 border border-cyan-400" />
+                      <span>Wkt</span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1363,6 +2122,38 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
             </motion.button>
           )}
 
+          {/* Guided Stretching & Mobility */}
+          <motion.div variants={itemVariants} className="w-full">
+            <div className="glass-panel rounded-3xl p-5 relative overflow-hidden flex flex-col gap-4 border border-white/5 bg-[#121214]">
+              <div>
+                <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold font-mono">
+                  Guided Restoration
+                </span>
+                <h3 className="text-sm font-semibold text-white mt-0.5">
+                  Mobility & Muscle Release
+                </h3>
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                {MOBILITY_ROUTINES.map(routine => (
+                  <div key={routine.id} className="flex justify-between items-center border-b border-white/5 pb-2.5 last:border-b-0 last:pb-0">
+                    <div className="flex flex-col gap-0.5 min-w-0 pr-2">
+                      <span className="text-xs font-bold text-zinc-200 truncate">{routine.title}</span>
+                      <span className="text-[10px] text-zinc-500 line-clamp-1">{routine.description}</span>
+                    </div>
+                    <button
+                      onClick={() => startMobilityRoutine(routine)}
+                      className="px-3.5 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-[9px] font-extrabold uppercase tracking-wider text-cyan-400 hover:text-cyan-300 cursor-pointer transition-all active:scale-95 flex-shrink-0"
+                    >
+                      {routine.duration} mins
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+
+
           {/* Philosophy Quote */}
           <motion.div
             variants={itemVariants}
@@ -1538,53 +2329,78 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                   Biophysical Log
                 </span>
                 <h2 className="text-lg font-bold text-white uppercase tracking-wider">
-                  Sleep Duration
+                  Sleep & Recovery
                 </h2>
                 <p className="text-[10px] text-zinc-500 mt-1 max-w-[240px] mx-auto leading-normal">
-                  Log your hours slept last night to calibrate CNS readiness recommendations.
+                  Log your sleep details to calibrate CNS readiness and deload advisories.
                 </p>
               </div>
 
-              {/* Slider panel */}
-              <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4 relative z-10">
-                <div className="flex justify-between items-center text-xs font-bold text-zinc-400 uppercase">
-                  <span>Logged Hours</span>
-                  <span className="text-lg font-extrabold text-white font-mono">
-                    {Math.floor(sleepHours)}h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)}m` : '00m'}
-                  </span>
+              {/* Sliders panel */}
+              <div className="glass-panel rounded-2xl p-5 flex flex-col gap-6 relative z-10">
+                {/* Hours Slider */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-xs font-bold text-zinc-400 uppercase">
+                    <span>Logged Hours</span>
+                    <span className="text-lg font-extrabold text-white font-mono">
+                      {Math.floor(sleepHours)}h {Math.round((sleepHours - Math.floor(sleepHours)) * 60) > 0 ? `${Math.round((sleepHours - Math.floor(sleepHours)) * 60)}m` : '00m'}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="4"
+                    max="12"
+                    step="0.5"
+                    value={sleepHours}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setSleepHours(val);
+                    }}
+                    className="w-full accent-white h-1 bg-zinc-800 rounded-lg cursor-pointer appearance-none"
+                  />
+                  <div className="flex justify-between text-[9px] text-zinc-500 font-semibold font-mono">
+                    <span>4.0h</span>
+                    <span>8.0h (Recommended)</span>
+                    <span>12.0h</span>
+                  </div>
                 </div>
 
-                <input
-                  type="range"
-                  min="4"
-                  max="12"
-                  step="0.5"
-                  value={sleepHours}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setSleepHours(val);
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('forma_sleep_hours', val.toFixed(1));
-                    }
-                  }}
-                  className="w-full accent-white h-1 bg-zinc-800 rounded-lg cursor-pointer appearance-none"
-                />
-
-                <div className="flex justify-between text-[9px] text-zinc-500 font-semibold font-mono">
-                  <span>4.0h</span>
-                  <span>8.0h (Recommended)</span>
-                  <span>12.0h</span>
+                {/* Quality Slider */}
+                <div className="flex flex-col gap-2 border-t border-white/5 pt-4">
+                  <div className="flex justify-between items-center text-xs font-bold text-zinc-400 uppercase">
+                    <span>Sleep Quality</span>
+                    <span className="text-lg font-extrabold text-white font-mono">
+                      {sleepQuality}/10
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={sleepQuality}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setSleepQuality(val);
+                    }}
+                    className="w-full accent-white h-1 bg-zinc-800 rounded-lg cursor-pointer appearance-none"
+                  />
+                  <div className="flex justify-between text-[9px] text-zinc-500 font-semibold font-mono">
+                    <span>1 (Poor)</span>
+                    <span>8 (Restful)</span>
+                    <span>10 (Optimal)</span>
+                  </div>
                 </div>
               </div>
 
               {/* Recommendation Feedback */}
               <div className={`glass-panel border rounded-xl p-4 flex items-start gap-3 relative z-10 transition-all duration-300 ${
-                sleepHours < 7.0 
+                sleepHours < 7.0 || sleepQuality < 6
                   ? 'bg-amber-950/20 border-amber-900/30' 
                   : 'bg-emerald-950/20 border-emerald-900/30'
               }`}>
                 <div className="mt-0.5">
-                  {sleepHours < 7.0 ? (
+                  {sleepHours < 7.0 || sleepQuality < 6 ? (
                     <AlertTriangle className="text-amber-400" size={18} />
                   ) : (
                     <ShieldCheck className="text-emerald-400" size={18} />
@@ -1593,13 +2409,13 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                      sleepHours < 7.0 ? 'text-amber-400' : 'text-emerald-400'
+                      sleepHours < 7.0 || sleepQuality < 6 ? 'text-amber-400' : 'text-emerald-400'
                     }`}>
-                      {sleepHours < 7.0 ? 'Deload Recommended' : 'Optimal CNS State'}
+                      {sleepHours < 7.0 || sleepQuality < 6 ? 'Deload Recommended' : 'Optimal CNS State'}
                     </span>
                   </div>
                   <p className="text-[10px] text-zinc-400 mt-1 leading-normal font-light">
-                    {sleepHours < 7.0 
+                    {sleepHours < 7.0 || sleepQuality < 6 
                       ? 'CNS fatigue warning: target weights reduced by 15% recommended.' 
                       : 'Green light to push for a new record!'}
                   </p>
@@ -1610,12 +2426,165 @@ export default function HorizonView({ sessions, workoutHistory, onStartWorkout, 
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => setIsSleepModalOpen(false)}
+                onClick={() => {
+                  saveSleepLog(sleepHours, sleepQuality);
+                  setIsSleepModalOpen(false);
+                }}
                 className="w-full bg-white text-black font-semibold text-xs uppercase py-3.5 rounded-xl flex items-center justify-center cursor-pointer shadow-lg active-glow relative z-10"
               >
                 Confirm & Apply
               </motion.button>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Guided Stretching & Mobility Player Overlay */}
+      <AnimatePresence>
+        {activeMobilityRoutine && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#020203]/98 backdrop-blur-md flex flex-col justify-between p-6 select-none font-sans"
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-white/5 pb-4">
+              <div className="flex flex-col">
+                <span className="text-[8px] uppercase tracking-widest text-zinc-500 font-extrabold font-mono">
+                  Guided Mobility
+                </span>
+                <span className="text-xs font-bold text-white uppercase tracking-wider mt-0.5">
+                  {activeMobilityRoutine.title}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
+                  setActiveMobilityRoutine(null);
+                  setMobilityTimerActive(false);
+                }}
+                className="p-2 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <Minus size={20} />
+              </button>
+            </div>
+
+            {/* Circular Timer Display */}
+            <div className="flex flex-col items-center justify-center my-auto gap-8">
+              <div className="relative flex items-center justify-center">
+                <svg className="w-48 h-48 sm:w-56 sm:h-56" viewBox="0 0 160 160">
+                  <defs>
+                    <linearGradient id="mobility-timer-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#14b8a6" />
+                      <stop offset="100%" stopColor="#06b6d4" />
+                    </linearGradient>
+                  </defs>
+                  <circle
+                    cx="80"
+                    cy="80"
+                    r="70"
+                    className="stroke-zinc-800/40 fill-transparent"
+                    strokeWidth="6"
+                  />
+                  <circle
+                    cx="80"
+                    cy="80"
+                    r="70"
+                    className="fill-transparent"
+                    strokeWidth="6"
+                    strokeLinecap="round"
+                    strokeDasharray="439.8"
+                    strokeDashoffset={439.8 - (439.8 * mobilityTimeLeft) / (activeMobilityRoutine.stretches[currentStretchIdx]?.duration || 60)}
+                    transform="rotate(-90 80 80)"
+                    style={{
+                      stroke: 'url(#mobility-timer-grad)',
+                      transition: 'stroke-dashoffset 1s linear'
+                    }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-4xl sm:text-5xl font-black text-white font-mono leading-none tabular-nums">
+                    {mobilityTimeLeft}
+                  </span>
+                  <span className="text-[8px] sm:text-[9px] text-zinc-500 uppercase tracking-widest font-extrabold mt-1">
+                    seconds left
+                  </span>
+                </div>
+              </div>
+
+              {/* Stretch Details */}
+              <div className="text-center max-w-xs flex flex-col gap-2">
+                <span className="text-[10px] uppercase tracking-widest text-[#14b8a6] font-bold font-mono">
+                  Stretch {currentStretchIdx + 1} of {activeMobilityRoutine.stretches.length}
+                </span>
+                <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight leading-snug">
+                  {activeMobilityRoutine.stretches[currentStretchIdx]?.name}
+                </h2>
+                <p className="text-xs text-zinc-400 font-light leading-relaxed">
+                  {activeMobilityRoutine.stretches[currentStretchIdx]?.cues}
+                </p>
+              </div>
+
+              {/* Up Next Preview */}
+              <div className="text-center bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-2.5">
+                <span className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold font-mono block">
+                  Up Next
+                </span>
+                <span className="text-[11px] font-bold text-zinc-300">
+                  {currentStretchIdx < activeMobilityRoutine.stretches.length - 1
+                    ? activeMobilityRoutine.stretches[currentStretchIdx + 1].name
+                    : 'Routine Finished'}
+                </span>
+              </div>
+            </div>
+
+            {/* Player Controls */}
+            <div className="flex gap-4 w-full justify-between items-center border-t border-white/5 pt-6">
+              <button
+                onClick={() => {
+                  if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
+                  setActiveMobilityRoutine(null);
+                  setMobilityTimerActive(false);
+                }}
+                className="flex-1 py-3.5 border border-white/5 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-white rounded-xl transition-all cursor-pointer text-center"
+              >
+                Quit Flow
+              </button>
+              
+              <button
+                onClick={() => setIsMobilityPaused(!isMobilityPaused)}
+                className="w-14 h-14 rounded-full bg-white hover:bg-zinc-200 text-black flex items-center justify-center cursor-pointer transition-all active:scale-95 flex-shrink-0"
+              >
+                {isMobilityPaused ? (
+                  <svg className="w-5 h-5 fill-current ml-0.5" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  triggerHaptic([30]);
+                  const nextIdx = currentStretchIdx + 1;
+                  if (nextIdx < activeMobilityRoutine.stretches.length) {
+                    setCurrentStretchIdx(nextIdx);
+                    const nextStretch = activeMobilityRoutine.stretches[nextIdx];
+                    speakStretch(nextStretch.name, nextStretch.cues);
+                    setMobilityTimeLeft(nextStretch.duration);
+                  } else {
+                    completeMobilityRoutine();
+                  }
+                }}
+                className="flex-1 py-3.5 bg-[#14b8a6] hover:bg-teal-400 text-black font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center"
+              >
+                Skip Stretch
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -16,6 +16,7 @@ export interface CardioDetails {
   duration?: number;
   workoutDuration?: number; // global stopwatch elapsed duration
   caloriesBurned?: number;
+  avgHeartRate?: number;
 }
 
 export interface RecoveryDetails {

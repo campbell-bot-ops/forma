@@ -99,3 +99,48 @@ self.addEventListener('notificationclick', (event) => {
     );
   }
 });
+
+// Periodic Background Sync — Chrome on Android can wake the service worker
+// even when the PWA is closed, allowing notifications without a push server.
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'forma-daily-sync') {
+    event.waitUntil(handleDailySync());
+  }
+});
+
+async function handleDailySync() {
+  const now = new Date();
+  const hours = now.getHours();
+
+  let title = '';
+  let body = '';
+  let tag = '';
+
+  if (hours >= 8 && hours < 10) {
+    title = 'FORMA Morning Check-In';
+    body = 'Your training split is ready. Open FORMA to review today\'s session.';
+    tag = 'forma-morning-sync';
+  } else if (hours >= 14 && hours < 15) {
+    title = 'FORMA Cellular Hydration';
+    body = 'Time to hydrate and calibrate optimal cellular recovery.';
+    tag = 'forma-hydration-sync';
+  } else if (hours >= 16 && hours < 17) {
+    title = 'FORMA Architecture Check';
+    body = 'Review your daily session split and log today\'s progress.';
+    tag = 'forma-workout-sync';
+  }
+
+  if (title) {
+    await self.registration.showNotification(title, {
+      body,
+      icon: '/Frame 166.png',
+      badge: '/Frame 166.png',
+      tag, // Prevents duplicate notifications for the same event
+      vibrate: [100, 50, 100],
+      actions: [
+        { action: 'explore', title: 'Open FORMA' },
+        { action: 'close', title: 'Close' }
+      ]
+    });
+  }
+}

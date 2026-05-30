@@ -59,7 +59,7 @@ interface AppContextType {
   startWorkout: (session: WorkoutSession) => void;
   completeCnsSurvey: (score: number, scale: number) => void;
   updateWeight: (exerciseId: string, newWeight: number) => Promise<void>;
-  finishWorkout: (logs: any, duration?: number, notes?: string, tags?: string[]) => Promise<void>;
+  finishWorkout: (logs: any, duration?: number, notes?: string, tags?: string[], cardioExtra?: any) => Promise<void>;
   logRecovery: (logs: any) => Promise<void>;
   logRest: (logs: any) => Promise<void>;
   completeFinisher: (cardioStats?: any) => Promise<void>;
@@ -176,75 +176,142 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Daily notification reminders check
+  // Daily notification reminders — persistent dedup + smart on-open triggers
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    let lastHydrationDate = '';
-    let lastWorkoutDate = '';
+    const HYDRATION_KEY = 'forma_notified_hydration';
+    const WORKOUT_KEY = 'forma_notified_workout';
+    const OPEN_REMINDER_KEY = 'forma_notified_open';
 
-    const checkNotifications = async () => {
-      const isNotificationsEnabled = localStorage.getItem('forma_notifications_enabled') === 'true';
-      if (!isNotificationsEnabled) return;
+    const getTodayStr = () => new Date().toDateString();
+
+    const sendNotification = async (title: string, body: string, tag: string) => {
+      if (hapticEnabled && navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+      try {
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          await reg.showNotification(title, {
+            body,
+            icon: '/Frame 166.png',
+            badge: '/Frame 166.png',
+            tag, // OS-level dedup: same tag replaces existing notification
+          });
+        } else {
+          new Notification(title, { body, icon: '/Frame 166.png' });
+        }
+      } catch (e) {
+        console.warn('FORMA: Failed to send notification:', e);
+      }
+    };
+
+    // Smart "on app open" notification — fires once per day when the user
+    // actually opens the app, which is the only reliable trigger on mobile.
+    const fireOpenReminder = async () => {
+      const isEnabled = localStorage.getItem('forma_notifications_enabled') === 'true';
+      if (!isEnabled) return;
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+      const todayStr = getTodayStr();
+      if (localStorage.getItem(OPEN_REMINDER_KEY) === todayStr) return;
+
+      const now = new Date();
+      const hours = now.getHours();
+
+      // Read workout history directly from db to avoid stale React state
+      let hasWorkoutToday = false;
+      try {
+        const history = await db.getHistory();
+        const todayIso = now.toISOString().split('T')[0];
+        hasWorkoutToday = history.some((w: CompletedWorkout) => w.date.startsWith(todayIso));
+      } catch (e) {
+        // DB not ready yet — skip this check
+      }
+
+      let title = '';
+      let body = '';
+
+      if (hours >= 6 && hours < 12 && !hasWorkoutToday) {
+        title = 'FORMA Morning Check-In';
+        body = 'Your training split is ready. Review today\'s session and set your intent.';
+      } else if (hours >= 12 && hours < 15) {
+        title = 'FORMA Cellular Hydration';
+        body = 'Aligning Physical Architecture: Time to hydrate and calibrate optimal cellular recovery.';
+        localStorage.setItem(HYDRATION_KEY, todayStr);
+      } else if (hours >= 15 && hours < 20 && !hasWorkoutToday) {
+        title = 'FORMA Architecture Check';
+        body = 'You haven\'t logged a session today. Even a rest day keeps your streak alive.';
+        localStorage.setItem(WORKOUT_KEY, todayStr);
+      } else if (hours >= 20 && !hasWorkoutToday) {
+        title = 'FORMA Evening Reflection';
+        body = 'No session logged today. Rest is part of the architecture — log it to stay consistent.';
+      }
+
+      if (title) {
+        localStorage.setItem(OPEN_REMINDER_KEY, todayStr);
+        await sendNotification(title, body, 'forma-open-reminder');
+      }
+    };
+
+    // Scheduled time-window notifications — widens from exact-minute to full-hour
+    // windows so the 30s polling interval can reliably catch them.
+    const checkScheduledNotifications = async () => {
+      const isEnabled = localStorage.getItem('forma_notifications_enabled') === 'true';
+      if (!isEnabled) return;
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
       const now = new Date();
       const todayStr = now.toDateString();
       const hours = now.getHours();
-      const minutes = now.getMinutes();
 
-      // Daily Hydration Check at 2:00 PM (14:00)
-      if (hours === 14 && minutes === 0 && lastHydrationDate !== todayStr) {
-        lastHydrationDate = todayStr;
-        
-        const title = 'FORMA Cellular Hydration';
-        const body = 'Aligning Physical Architecture: Time to hydrate and calibrate optimal cellular recovery.';
-        
-        if (hapticEnabled && navigator.vibrate) {
-          navigator.vibrate([100, 50, 100]);
-        }
-
-        if ('serviceWorker' in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          reg.showNotification(title, {
-            body,
-            icon: '/Frame 166.png',
-            badge: '/Frame 166.png'
-          });
-        } else {
-          new Notification(title, { body, icon: '/Frame 166.png' });
-        }
+      // Hydration reminder: anytime during the 14:00 hour (2 PM – 2:59 PM)
+      if (hours === 14 && localStorage.getItem(HYDRATION_KEY) !== todayStr) {
+        localStorage.setItem(HYDRATION_KEY, todayStr);
+        await sendNotification(
+          'FORMA Cellular Hydration',
+          'Aligning Physical Architecture: Time to hydrate and calibrate optimal cellular recovery.',
+          'forma-hydration'
+        );
       }
 
-      // Daily Workout / Training check-in prompt at 4:00 PM (16:00)
-      if (hours === 16 && minutes === 0 && lastWorkoutDate !== todayStr) {
-        lastWorkoutDate = todayStr;
-        
-        const title = 'FORMA Architecture Check';
-        const body = 'Review your daily session split and log today\'s progress to maintain consistency.';
-        
-        if (hapticEnabled && navigator.vibrate) {
-          navigator.vibrate([200, 100, 200]);
-        }
-
-        if ('serviceWorker' in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          reg.showNotification(title, {
-            body,
-            icon: '/Frame 166.png',
-            badge: '/Frame 166.png'
-          });
-        } else {
-          new Notification(title, { body, icon: '/Frame 166.png' });
-        }
+      // Workout reminder: anytime during the 16:00 hour (4 PM – 4:59 PM)
+      if (hours === 16 && localStorage.getItem(WORKOUT_KEY) !== todayStr) {
+        localStorage.setItem(WORKOUT_KEY, todayStr);
+        await sendNotification(
+          'FORMA Architecture Check',
+          'Review your daily session split and log today\'s progress to maintain consistency.',
+          'forma-workout-reminder'
+        );
       }
     };
 
-    // Run check immediately, then every 30 seconds
-    checkNotifications();
-    const interval = setInterval(checkNotifications, 30000);
+    // Delay the open reminder slightly to let initial DB data load first
+    const openTimeout = setTimeout(fireOpenReminder, 2500);
 
-    return () => clearInterval(interval);
+    // Run scheduled checks on interval (catches time-window notifications)
+    checkScheduledNotifications();
+    const interval = setInterval(checkScheduledNotifications, 30000);
+
+    // Register periodic background sync as a progressive enhancement —
+    // Chrome on Android can wake the service worker even when the app is closed.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg: ServiceWorkerRegistration) => {
+        if ('periodicSync' in reg) {
+          (reg as any).periodicSync.register('forma-daily-sync', {
+            minInterval: 4 * 60 * 60 * 1000, // Every 4 hours
+          }).catch(() => {
+            // Periodic sync not granted — requires sufficient site engagement
+          });
+        }
+      });
+    }
+
+    return () => {
+      clearTimeout(openTimeout);
+      clearInterval(interval);
+    };
   }, [hapticEnabled]);
 
   // Standard haptic vibration helper
@@ -371,7 +438,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const finishWorkout = async (logs: any, duration?: number, notes?: string, tags?: string[]) => {
+  const finishWorkout = async (logs: any, duration?: number, notes?: string, tags?: string[], cardioExtra?: any) => {
     if (!activeSession) return;
 
     let actualTonnage = 0;
@@ -402,7 +469,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       notes: notes || undefined,
       tags: tags || undefined,
       cnsScore: cnsScore,
-      cardioDetails: duration ? { workoutDuration: duration } : undefined
+      cardioDetails: {
+        workoutDuration: duration,
+        ...cardioExtra
+      }
     };
 
     const newHistory = await db.logWorkout(completedWorkout);

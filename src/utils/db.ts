@@ -728,6 +728,10 @@ export const db = {
         .eq('user_id', user.id)
         .order('date', { ascending: false })) as any;
 
+      if (error) {
+        console.error("FORMA: Supabase getHistory query error:", error);
+      }
+
       if (error || !data) {
         if (typeof window !== 'undefined') {
           const cached = localStorage.getItem('forma_history');
@@ -740,7 +744,7 @@ export const db = {
         return [];
       }
 
-      const history = data.map((row: any) => ({
+      const remoteHistory = data.map((row: any) => ({
         id: row.id,
         sessionId: row.session_id,
         sessionTitle: row.session_title,
@@ -754,7 +758,28 @@ export const db = {
         cardioDetails: row.cardio_details,
         notes: row.notes || row.cardio_details?.notes || row.rest_details?.notes || undefined,
         tags: row.tags || row.cardio_details?.tags || row.rest_details?.tags || undefined
-      })).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }));
+
+      let history = [...remoteHistory];
+
+      // Merge local unsynced workouts (workouts without ID) so they are not wiped out
+      if (typeof window !== 'undefined') {
+        const cachedStr = localStorage.getItem('forma_history');
+        if (cachedStr) {
+          try {
+            const cachedHistory: any[] = JSON.parse(cachedStr);
+            const unsynced = cachedHistory.filter(item => !item.id);
+            unsynced.forEach((localLog: any) => {
+              const exists = remoteHistory.some((remoteLog: any) => remoteLog.date === localLog.date && remoteLog.sessionId === localLog.sessionId);
+              if (!exists) {
+                history.push(localLog);
+              }
+            });
+          } catch (e) {}
+        }
+      }
+
+      history.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
       if (typeof window !== 'undefined') {
         localStorage.setItem('forma_history', JSON.stringify(history));
@@ -824,6 +849,10 @@ export const db = {
             } : null)
           })
           .select()) as any;
+
+        if (error) {
+          console.error("FORMA: Supabase logWorkout insert error:", error);
+        }
 
         if (!error && data && data.length > 0) {
           completedLog.id = data[0].id;
@@ -1043,6 +1072,70 @@ export const db = {
   },
 
   /**
+   * Fetch sleep history log entries
+   */
+  async getSleepHistory(): Promise<Array<{ date: string; hours: number; quality: number }>> {
+    if (typeof window === 'undefined') return [];
+    const stored = localStorage.getItem('forma_sleep_history');
+    if (!stored) {
+      return [];
+    }
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      return [];
+    }
+  },
+
+  /**
+   * Log hours slept and sleep quality
+   */
+  async logSleep(hours: number, quality: number, dateStr?: string): Promise<Array<{ date: string; hours: number; quality: number }>> {
+    const getLocalYYYYMMDD = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const targetDateStr = dateStr || getLocalYYYYMMDD(new Date());
+    const entryDate = new Date().toISOString();
+    const history = await this.getSleepHistory();
+    
+    const filtered = history.filter(item => item.date !== targetDateStr);
+    const updated = [
+      ...filtered,
+      { date: targetDateStr, hours: parseFloat(hours.toFixed(1)), quality: Math.round(quality) }
+    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('forma_sleep_history', JSON.stringify(updated));
+    }
+
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { error } = await (supabase.from('sleep_history') as any)
+            .upsert({
+              user_id: user.id,
+              date: targetDateStr,
+              hours: parseFloat(hours.toFixed(1)),
+              quality: Math.round(quality),
+              updated_at: entryDate
+            }, { onConflict: 'user_id,date' });
+          if (error) {
+            console.error("FORMA: Supabase logSleep upsert error:", error.code, "-", error.message, "-", error.details);
+          }
+        }
+      } catch (e) {
+        console.error("FORMA Sleep History Sync Error:", e);
+      }
+    }
+    return updated;
+  },
+
+  /**
    * Reset database records (clears history, resets sessions to baseline)
    */
   async resetAll(): Promise<void> {
@@ -1154,6 +1247,10 @@ export const db = {
               })
               .select()) as any;
 
+            if (error) {
+              console.error("FORMA: Supabase syncOfflineQueue insert error:", error);
+            }
+
             if (!error && data && data.length > 0) {
               completedLog.id = data[0].id;
             }
@@ -1194,6 +1291,26 @@ export const db = {
           }
         } catch (e) {
           console.warn("FORMA Offline Weight History Sync Fallback (table may not exist):", e);
+        }
+      }
+
+      // 4. Sync local sleep history logs
+      const sleepHistoryStr = localStorage.getItem('forma_sleep_history');
+      if (sleepHistoryStr) {
+        try {
+          const localSleepHistory: Array<{ date: string; hours: number; quality: number }> = JSON.parse(sleepHistoryStr);
+          for (const entry of localSleepHistory) {
+            await (supabase.from('sleep_history') as any)
+              .upsert({
+                user_id: user.id,
+                date: entry.date,
+                hours: entry.hours,
+                quality: entry.quality,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id,date' });
+          }
+        } catch (e) {
+          console.warn("FORMA Offline Sleep History Sync Fallback (table may not exist):", e);
         }
       }
     } catch (e) {
